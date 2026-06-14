@@ -8,7 +8,7 @@ class OllamaLLMClient(LLMClientProtocol):
     def __init__(self):
         self.http_client = get_ollama_http_client()
 
-    async def chat(self, prompt: str, prompt_system: str) -> ChatResultSchema:
+    async def chat(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
         meta = settings.llm.meta
         request = OllamaChatRequestSchema(
             model=meta.model,

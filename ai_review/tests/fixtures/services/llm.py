@@ -10,7 +10,7 @@ class FakeLLMClient(LLMClientProtocol):
         self.calls: list[tuple[str, dict]] = []
         self.responses = responses or {}
 
-    async def chat(self, prompt: str, prompt_system: str) -> ChatResultSchema:
+    async def chat(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
         self.calls.append(("chat", {"prompt": prompt, "prompt_system": prompt_system}))
 
         return self.responses.get(

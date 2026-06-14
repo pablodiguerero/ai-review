@@ -11,5 +11,5 @@ class ChatResultSchema(BaseModel):
 
 
 class LLMClientProtocol(Protocol):
-    async def chat(self, prompt: str, prompt_system: str) -> ChatResultSchema:
+    async def chat(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
         ...

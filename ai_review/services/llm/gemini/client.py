@@ -13,7 +13,7 @@ class GeminiLLMClient(LLMClientProtocol):
     def __init__(self):
         self.http_client = get_gemini_http_client()
 
-    async def chat(self, prompt: str, prompt_system: str) -> ChatResultSchema:
+    async def chat(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
         request = GeminiChatRequestSchema(
             contents=[GeminiContentSchema(parts=[GeminiPartSchema(text=prompt)])],
             generation_config=GeminiGenerationConfigSchema(

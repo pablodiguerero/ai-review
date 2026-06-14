@@ -8,7 +8,7 @@ class AzureOpenAILLMClient(LLMClientProtocol):
     def __init__(self):
         self.http_client = get_azure_openai_http_client()
 
-    async def chat(self, prompt: str, prompt_system: str) -> ChatResultSchema:
+    async def chat(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
         request = AzureOpenAIChatRequestSchema(
             messages=[
                 AzureOpenAIMessage(role="system", content=prompt_system),

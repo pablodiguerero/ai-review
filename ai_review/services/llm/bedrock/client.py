@@ -8,7 +8,7 @@ class BedrockLLMClient(LLMClientProtocol):
     def __init__(self):
         self.http_client = get_bedrock_http_client()
 
-    async def chat(self, prompt: str, prompt_system: str) -> ChatResultSchema:
+    async def chat(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
         meta = settings.llm.meta
         request = BedrockChatRequestSchema(
             messages=[

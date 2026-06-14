@@ -9,5 +9,5 @@ RUN apt-get update && \
 RUN git config --global --add safe.directory '*'
 RUN git config --global core.quotepath false
 
-ARG AI_REVIEW_VERSION
-RUN pip install --no-cache-dir xai-review==${AI_REVIEW_VERSION}
+COPY . /src
+RUN pip install --no-cache-dir /src

@@ -8,14 +8,14 @@ from ai_review.tests.fixtures.services.prompt import FakePromptService
 
 
 def sequence_chat(outputs: list[str]):
-    async def chat(prompt: str, prompt_system: str) -> ChatResultSchema:
+    async def chat(prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
         return ChatResultSchema(text=outputs.pop(0))
 
     return chat
 
 
 def sequence_chat_results(outputs: list[ChatResultSchema]):
-    async def chat(prompt: str, prompt_system: str) -> ChatResultSchema:
+    async def chat(prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
         return outputs.pop(0)
 
     return chat

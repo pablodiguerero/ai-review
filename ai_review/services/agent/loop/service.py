@@ -89,6 +89,7 @@ class AgentLoopService(AgentLoopServiceProtocol):
         fallback_result = await self.llm.chat(
             prompt=agent_prompt,
             prompt_system=agent_prompt_system,
+            json_mode=True,
         )
         fallback_text = fallback_result.text
         fallback_step: AgentStepSchema | None = self.parser.parse_output(fallback_text)
@@ -146,6 +147,7 @@ class AgentLoopService(AgentLoopServiceProtocol):
             result = await self.llm.chat(
                 prompt=agent_prompt,
                 prompt_system=agent_prompt_system,
+                json_mode=True,
             )
             logger.debug(f"Agent LLM response at iteration {iteration}: {result.text[:500]}")
 
