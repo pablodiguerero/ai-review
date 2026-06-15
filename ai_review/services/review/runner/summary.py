@@ -1,3 +1,4 @@
+from ai_review.config import settings
 from ai_review.libs.logger import get_logger
 from ai_review.services.cost.types import CostServiceProtocol
 from ai_review.services.diff.types import DiffServiceProtocol
@@ -37,13 +38,50 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
         self.review_llm_gateway = review_llm_gateway
         self.review_comment_gateway = review_comment_gateway
 
+    async def _build_prior_feedback(self) -> str | None:
+        """Collect prior AI summary reviews and the human responses to them, so the
+        model can learn from feedback instead of repeating refuted findings."""
+        tag = settings.review.summary_tag
+        threads = await self.vcs.get_general_threads()
+        blocks: list[str] = []
+        for thread in threads:
+            if not thread.comments:
+                continue
+            root = thread.comments[0]
+            if tag not in (root.body or ""):
+                continue
+            replies = [c for c in thread.comments[1:] if (c.body or "").strip()]
+            if not replies:
+                continue
+            responses = "\n".join(
+                f"- {c.author.username or c.author.name or 'user'}: {c.body.strip()}"
+                for c in replies
+            )
+            blocks.append(
+                "### A previous AI review\n"
+                f"{root.body.strip()}\n\n"
+                "### Team responses to that review (authoritative feedback — do not repeat "
+                "findings that were refuted, and apply accepted corrections)\n"
+                f"{responses}"
+            )
+        if not blocks:
+            return None
+        return "\n\n---\n\n".join(blocks)
+
     async def run(self) -> None:
         await hook.emit_summary_review_start()
 
         comments = await self.review_comment_gateway.get_summary_comments()
+        prior_feedback: str | None = None
         if comments:
-            logger.info(f"Detected {len(comments)} existing AI summary comments, skipping summary review")
-            return
+            if not settings.review.summary_feedback_loop:
+                logger.info(f"Detected {len(comments)} existing AI summary comments, skipping summary review")
+                return
+            prior_feedback = await self._build_prior_feedback()
+            logger.info(
+                f"Feedback loop enabled: {len(comments)} prior summary comment(s); re-reviewing with "
+                f"prior feedback in context (history kept, old summaries not deleted)"
+            )
 
         review_info = await self.vcs.get_review_info()
         changed_files = self.policy.apply_for_files(review_info.changed_files)
@@ -60,7 +98,7 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
             head_sha=review_info.head_sha,
         )
         prompt_context = build_prompt_context_from_review_info(review_info)
-        prompt = self.prompt.build_summary_request(rendered_files, prompt_context)
+        prompt = self.prompt.build_summary_request(rendered_files, prompt_context, prior_feedback=prior_feedback)
         prompt_system = self.prompt.build_system_summary_request(prompt_context)
         prompt_result = await self.review_llm_gateway.ask(prompt, prompt_system)
 

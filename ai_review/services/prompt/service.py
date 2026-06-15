@@ -54,11 +54,22 @@ class PromptService(PromptServiceProtocol):
         )
 
     @classmethod
-    def build_summary_request(cls, diffs: list[DiffFileSchema], context: PromptContextSchema) -> str:
+    def build_summary_request(
+            cls,
+            diffs: list[DiffFileSchema],
+            context: PromptContextSchema,
+            prior_feedback: str | None = None,
+    ) -> str:
         prompt = cls.prepare_prompt(settings.prompt.load_summary(), context)
         changes = format_files(diffs)
+        feedback = (
+            f"## Previous reviews and team responses\n\n{prior_feedback}\n\n"
+            if prior_feedback
+            else ""
+        )
         return (
             f"{prompt}\n\n"
+            f"{feedback}"
             f"## Changes\n\n"
             f"{changes}\n"
         )

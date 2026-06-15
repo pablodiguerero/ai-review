@@ -25,6 +25,7 @@ class ReviewConfig(BaseModel):
     inline_fallback_tag: str = Field(default="#ai-review-inline-fallback")
     summary_tag: str = Field(default="#ai-review-summary")
     summary_reply_tag: str = Field(default="#ai-review-summary-reply")
+    summary_feedback_loop: bool = Field(default=False)
     context_lines: int = Field(default=10, ge=0)
     allow_changes: list[str] = Field(default_factory=list)
     ignore_changes: list[str] = Field(default_factory=list)
