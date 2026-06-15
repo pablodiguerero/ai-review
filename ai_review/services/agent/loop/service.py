@@ -27,6 +27,7 @@ class AgentLoopService(AgentLoopServiceProtocol):
         self.agent_tool = agent_tool
         self.max_iterations = settings.agent.max_iterations
         self.max_context_chars = settings.agent.max_total_context_chars
+        self.min_tool_calls = settings.agent.min_tool_calls
 
         self.parser = LLMOutputJSONParser(AgentStepSchema)
         self.traces: list[AgentTraceSchema] = []
@@ -124,8 +125,10 @@ class AgentLoopService(AgentLoopServiceProtocol):
 
     async def run(self, prompt: str, prompt_system: str) -> AgentLoopResultSchema:
         self.clear()
+        tool_calls = 0
         logger.info(
-            f"Starting agent loop: max_iterations={self.max_iterations}, max_context_chars={self.max_context_chars}"
+            f"Starting agent loop: max_iterations={self.max_iterations}, "
+            f"min_tool_calls={self.min_tool_calls}, max_context_chars={self.max_context_chars}"
         )
 
         for iteration in range(1, self.max_iterations + 1):
@@ -177,6 +180,29 @@ class AgentLoopService(AgentLoopServiceProtocol):
                 )
 
             if step.action.is_final:
+                if tool_calls < self.min_tool_calls:
+                    logger.info(
+                        f"Iteration {iteration}: FINAL rejected — only {tool_calls}/{self.min_tool_calls} "
+                        f"verification commands run; nudging the agent to keep verifying"
+                    )
+                    self.traces.append(
+                        AgentTraceSchema(
+                            step=step,
+                            warning=(
+                                f"REJECTED: you returned FINAL after only {tool_calls} verification "
+                                f"command(s). You MUST run at least {self.min_tool_calls} read-only "
+                                f"commands (e.g. grep/cat node_modules, rg src) to verify the diff's claims "
+                                f"before finalizing. Do NOT finalize yet — issue a TOOL_CALL now."
+                            ),
+                            iteration=iteration,
+                            raw_output=result.text,
+                            total_tokens=result.total_tokens,
+                            prompt_tokens=result.prompt_tokens,
+                            completion_tokens=result.completion_tokens,
+                        )
+                    )
+                    continue
+
                 logger.info(f"Agent loop iteration {iteration} returned FINAL action")
                 self.traces.append(
                     AgentTraceSchema(
@@ -197,6 +223,7 @@ class AgentLoopService(AgentLoopServiceProtocol):
 
             trace = await self.run_step(step=step, chat=result, iteration=iteration)
             self.traces.append(trace)
+            tool_calls += 1
 
             self.context_used += len(trace.tool_output or "")
             logger.debug(

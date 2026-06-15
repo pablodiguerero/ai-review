@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class AgentConfig(BaseModel):
     enabled: bool = False
     max_iterations: int = Field(default=25, ge=1, le=100)
+    min_tool_calls: int = Field(default=0, ge=0, le=50)
     allow_commands: list[re.Pattern[str]] = Field(
         default_factory=lambda: [
             re.compile(r"^ls(?:\s+.*)?$"),
