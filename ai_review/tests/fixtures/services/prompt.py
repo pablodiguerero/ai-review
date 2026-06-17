@@ -38,8 +38,15 @@ class FakePromptService(PromptServiceProtocol):
         self.calls.append(("build_inline_request", {"diff": diff, "context": context}))
         return f"INLINE_PROMPT_FOR_{diff.file}"
 
-    def build_summary_request(self, diffs: list[DiffFileSchema], context: PromptContextSchema) -> str:
-        self.calls.append(("build_summary_request", {"diffs": diffs, "context": context}))
+    def build_summary_request(
+            self,
+            diffs: list[DiffFileSchema],
+            context: PromptContextSchema,
+            prior_feedback: str | None = None,
+    ) -> str:
+        self.calls.append(
+            ("build_summary_request", {"diffs": diffs, "context": context, "prior_feedback": prior_feedback})
+        )
         return "SUMMARY_PROMPT"
 
     def build_context_request(self, diffs: list[DiffFileSchema], context: PromptContextSchema) -> str:

@@ -43,24 +43,51 @@ async def test_run_returns_final_when_llm_returns_final(
 
 
 @pytest.mark.asyncio
-async def test_run_returns_unstructured_response_when_json_parse_fails(
+async def test_run_breaks_to_force_final_when_parse_fails(
         monkeypatch: pytest.MonkeyPatch,
         agent_loop_service: AgentLoopService,
         fake_llm_client: FakeLLMClient,
         fake_agent_tool_service: FakeAgentToolService,
 ) -> None:
+    agent_loop_service.empty_response_retries = 0
+    agent_loop_service.force_final_attempts = 1
     monkeypatch.setattr(
         fake_llm_client,
         "chat",
-        sequence_chat(["not-json"]),
+        sequence_chat([
+            "not-json",
+            '{"action":"FINAL","content":"recovered"}',
+        ]),
     )
 
     result = await agent_loop_service.run("PROMPT", "SYSTEM")
 
-    assert result.stop_reason == "unstructured_response"
-    assert result.final_text == "not-json"
-    assert "Failed to parse structured action" in (result.traces[0].warning or "")
+    # An unparseable step must not be dumped as the review; the loop force-finalizes.
+    assert result.stop_reason == "forced_final"
+    assert result.final_text == "recovered"
     assert fake_agent_tool_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_retries_empty_response_then_succeeds(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+) -> None:
+    agent_loop_service.empty_response_retries = 2
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            "",
+            '{"action":"FINAL","content":"after-empty"}',
+        ]),
+    )
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM")
+
+    assert result.stop_reason == "final"
+    assert result.final_text == "after-empty"
 
 
 @pytest.mark.asyncio
@@ -134,7 +161,7 @@ async def test_run_forces_final_when_context_limit_reached(
 
     result = await agent_loop_service.run("PROMPT", "SYSTEM")
 
-    assert result.stop_reason == "max_requests_or_context_limit"
+    assert result.stop_reason == "forced_final"
     assert result.final_text == "forced-final"
     assert any(
         call[0] == "build_agent_request" and call[1]["force_final"] is True
@@ -143,18 +170,21 @@ async def test_run_forces_final_when_context_limit_reached(
 
 
 @pytest.mark.asyncio
-async def test_force_final_returns_raw_when_forced_response_is_not_final_json(
+async def test_force_final_skips_when_forced_response_is_never_final(
         monkeypatch: pytest.MonkeyPatch,
         agent_loop_service: AgentLoopService,
         fake_llm_client: FakeLLMClient,
         fake_agent_tool_service: FakeAgentToolService,
 ) -> None:
+    agent_loop_service.empty_response_retries = 0
+    agent_loop_service.force_final_attempts = 2
     monkeypatch.setattr(
         fake_llm_client,
         "chat",
         sequence_chat([
             '{"action":"TOOL_CALL","command":"cat big.txt"}',
-            '{"action":"TOOL_CALL","command":"cat big.txt"}',
+            '{"action":"TOOL_CALL","command":"cat x"}',
+            '{"action":"TOOL_CALL","command":"cat y"}',
         ]),
     )
     fake_agent_tool_service.responses["execute"] = "0123456789"
@@ -162,8 +192,10 @@ async def test_force_final_returns_raw_when_forced_response_is_not_final_json(
 
     result = await agent_loop_service.run("PROMPT", "SYSTEM")
 
-    assert result.stop_reason == "max_requests_or_context_limit"
-    assert result.final_text == '{"action":"TOOL_CALL","command":"cat big.txt"}'
+    # A forced response that is a TOOL_CALL (not FINAL) must never be posted as the
+    # review — the loop returns empty text so the runner skips the comment.
+    assert result.stop_reason == "forced_final_no_review"
+    assert result.final_text == ""
 
 
 @pytest.mark.asyncio
@@ -218,7 +250,7 @@ async def test_run_forces_final_when_max_iterations_reached(
 
     result = await agent_loop_service.run("PROMPT", "SYSTEM")
 
-    assert result.stop_reason == "max_requests_or_context_limit"
+    assert result.stop_reason == "forced_final"
     assert result.final_text == "forced"
     assert any(
         call[0] == "build_agent_request" and call[1]["force_final"] is True
@@ -245,22 +277,24 @@ async def test_run_handles_coerced_list_content_as_final(
 
 
 @pytest.mark.asyncio
-async def test_run_handles_empty_llm_response(
+async def test_run_skips_when_llm_only_returns_empty(
         monkeypatch: pytest.MonkeyPatch,
         agent_loop_service: AgentLoopService,
         fake_llm_client: FakeLLMClient,
 ) -> None:
+    agent_loop_service.empty_response_retries = 0
+    agent_loop_service.force_final_attempts = 1
     monkeypatch.setattr(
         fake_llm_client,
         "chat",
-        sequence_chat([""]),
+        sequence_chat(["", ""]),
     )
 
     result = await agent_loop_service.run("PROMPT", "SYSTEM")
 
-    assert result.stop_reason == "unstructured_response"
+    # Persistent empty content must not post a comment.
+    assert result.stop_reason == "forced_final_no_review"
     assert result.final_text == ""
-    assert result.traces[0].step.content == "Empty model response"
 
 
 @pytest.mark.asyncio

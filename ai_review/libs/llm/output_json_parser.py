@@ -56,5 +56,52 @@ class LLMOutputJSONParser(Generic[T]):
             logger.info(f"[{self.model_name}] Successfully parsed")
             return parsed
 
+        # Salvage: the model sometimes emits a valid JSON object and then keeps
+        # generating trailing text (e.g. a fabricated "Tool output: ..." after a
+        # ReAct step). That makes a whole-string parse fail on trailing chars.
+        # Parse just the first balanced object and ignore everything after it.
+        candidate = self._extract_first_json_object(output)
+        if candidate and candidate != output:
+            logger.debug(f"[{self.model_name}] Retrying parse on the first JSON object (trailing text ignored)")
+            if parsed := self.try_parse(candidate):
+                logger.info(f"[{self.model_name}] Successfully parsed first JSON object")
+                return parsed
+
         logger.error(f"[{self.model_name}] No valid JSON found in output")
+        return None
+
+    @staticmethod
+    def _extract_first_json_object(text: str) -> str | None:
+        """Return the substring of the first balanced top-level ``{...}`` object, or None.
+
+        String literals (and their escapes) are skipped so braces inside strings
+        do not affect nesting depth.
+        """
+        start = text.find("{")
+        if start == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escape = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:index + 1]
+
         return None

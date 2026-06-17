@@ -22,7 +22,12 @@ class PromptServiceProtocol(Protocol):
     def build_inline_request(self, diff: DiffFileSchema, context: PromptContextSchema) -> str:
         ...
 
-    def build_summary_request(self, diffs: list[DiffFileSchema], context: PromptContextSchema) -> str:
+    def build_summary_request(
+            self,
+            diffs: list[DiffFileSchema],
+            context: PromptContextSchema,
+            prior_feedback: str | None = None,
+    ) -> str:
         ...
 
     def build_context_request(self, diffs: list[DiffFileSchema], context: PromptContextSchema) -> str:
