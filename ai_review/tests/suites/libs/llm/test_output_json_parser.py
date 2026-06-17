@@ -153,3 +153,25 @@ def test_parse_output_with_extra_control_chars(llm_output_json_parser: LLMOutput
     result = llm_output_json_parser.try_parse(raw)
 
     assert result is None
+
+
+def test_parse_output_salvages_first_object_with_trailing_text(llm_output_json_parser: LLMOutputJSONParser):
+    """Should parse a valid JSON object even when the model appends trailing text.
+
+    Mirrors the real failure where the model emitted a valid ReAct step and then
+    kept generating a fabricated "Tool output: ..." after the closing brace.
+    """
+    output = '{"text": "ok"}\nTool output: command ran\nstdout: a\nb\nstderr:'
+    result = llm_output_json_parser.parse_output(output)
+
+    assert isinstance(result, DummyModel)
+    assert result.text == "ok"
+
+
+def test_parse_output_salvage_respects_braces_inside_strings(llm_output_json_parser: LLMOutputJSONParser):
+    """Should not be confused by braces that live inside string values."""
+    output = '{"text": "has } a brace"} and some trailing chatter'
+    result = llm_output_json_parser.parse_output(output)
+
+    assert isinstance(result, DummyModel)
+    assert result.text == "has } a brace"
