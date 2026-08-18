@@ -1,6 +1,6 @@
 import pytest
 
-from ai_review.services.agent.loop.service import AgentLoopService
+from ai_review.services.agent.loop.service import AgentLoopService, AgentVerificationAborted
 from ai_review.services.llm.types import ChatResultSchema
 from ai_review.tests.fixtures.services.agent.tool import FakeAgentToolService
 from ai_review.tests.fixtures.services.llm import FakeLLMClient
@@ -66,6 +66,76 @@ async def test_run_breaks_to_force_final_when_parse_fails(
     assert result.stop_reason == "forced_final"
     assert result.final_text == "recovered"
     assert fake_agent_tool_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_aborts_when_the_llm_fails_before_any_verification(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+) -> None:
+    # Force-finalizing here would publish a review that ran no verification at
+    # all, which is exactly what min_tool_calls exists to prevent.
+    agent_loop_service.empty_response_retries = 0
+    agent_loop_service.force_final_attempts = 1
+    agent_loop_service.min_tool_calls = 2
+
+    calls: list[int] = []
+
+    async def failing_chat(prompt: str, prompt_system: str, json_mode: bool = False):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("stream transport error")
+
+        # Would be published as the review if the loop force-finalized here.
+        return ChatResultSchema(
+            text='{"action":"FINAL","content":"LGTM, no issues"}',
+            total_tokens=1,
+            prompt_tokens=1,
+            completion_tokens=1,
+        )
+
+    monkeypatch.setattr(fake_llm_client, "chat", failing_chat)
+
+    with pytest.raises(AgentVerificationAborted, match="0/2"):
+        await agent_loop_service.run("PROMPT", "SYSTEM")
+
+    # One call only: no force-final attempt was made behind the abort.
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_breaks_to_force_final_when_the_llm_call_fails(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+) -> None:
+    # A failed intermediate call must keep the traces and force-finalize, not
+    # abort the review and throw away everything already paid for.
+    agent_loop_service.empty_response_retries = 0
+    agent_loop_service.force_final_attempts = 1
+    agent_loop_service.min_tool_calls = 0
+
+    calls: list[int] = []
+
+    async def failing_chat(prompt: str, prompt_system: str, json_mode: bool = False):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("stream hit the max_tokens limit mid-answer")
+
+        return ChatResultSchema(
+            text='{"action":"FINAL","content":"recovered"}',
+            total_tokens=1,
+            prompt_tokens=1,
+            completion_tokens=1,
+        )
+
+    monkeypatch.setattr(fake_llm_client, "chat", failing_chat)
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM")
+
+    assert result.stop_reason == "forced_final"
+    assert result.final_text == "recovered"
 
 
 @pytest.mark.asyncio

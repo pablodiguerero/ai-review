@@ -1,4 +1,5 @@
 from ai_review.libs.logger import get_logger
+from ai_review.services.agent.loop.service import AgentVerificationAborted
 from ai_review.services.agent.loop.types import AgentLoopServiceProtocol
 from ai_review.services.artifacts.types import ArtifactsServiceProtocol
 from ai_review.services.cost.schema import CalculateCostSchema
@@ -50,6 +51,12 @@ class ReviewAgentLLMGateway(ReviewLLMGatewayProtocol):
                 prompt_system=prompt_system,
             )
             return loop_result.final_text
+        except AgentVerificationAborted as error:
+            # Falling back here would post the unverified review the abort exists
+            # to prevent; an empty answer makes the runner skip the comment.
+            logger.error(f"Agent mode aborted before verifying anything, posting nothing: {error}")
+            await hook.emit_chat_error(prompt, prompt_system)
+            return ""
         except Exception as error:
             logger.exception(f"Agent mode failed, falling back to direct chat: {error}")
             await hook.emit_chat_error(prompt, prompt_system)

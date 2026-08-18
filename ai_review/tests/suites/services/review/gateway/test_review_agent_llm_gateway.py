@@ -54,6 +54,22 @@ async def test_agent_gateway_returns_agent_result(
 
 
 @pytest.mark.asyncio
+async def test_agent_gateway_does_not_fall_back_when_verification_was_aborted(
+        review_agent_llm_gateway: ReviewAgentLLMGateway,
+        fake_agent_loop_service: FakeAgentLoopService,
+        fake_fallback_review_llm_gateway: FakeFallbackReviewLLMGateway,
+):
+    # The abort exists to stop an unverified review; a one-shot fallback would
+    # publish exactly that.
+    fake_agent_loop_service.responses["abort"] = True
+
+    result = await review_agent_llm_gateway.ask("PROMPT", "SYSTEM_PROMPT")
+
+    assert result == ""
+    assert fake_fallback_review_llm_gateway.calls == []
+
+
+@pytest.mark.asyncio
 async def test_agent_gateway_falls_back_to_default_gateway_on_error(
         review_agent_llm_gateway: ReviewAgentLLMGateway,
         fake_agent_loop_service: FakeAgentLoopService,

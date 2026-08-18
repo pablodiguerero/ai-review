@@ -5,7 +5,8 @@
     "meta": {
       "model": "gpt-4o-mini",
       "max_tokens": 1200,
-      "temperature": 0.3
+      "temperature": 0.3,
+      "stream": false
     },
     "http_client": {
       "verify": true,

@@ -1,5 +1,9 @@
 from ai_review.clients.openai.v1.client import get_openai_v1_http_client
-from ai_review.clients.openai.v1.schema import OpenAIChatRequestSchema, OpenAIMessageSchema
+from ai_review.clients.openai.v1.schema import (
+    OpenAIChatRequestSchema,
+    OpenAIMessageSchema,
+    OpenAIStreamOptionsSchema,
+)
 from ai_review.clients.openai.v2.client import get_openai_v2_http_client
 from ai_review.clients.openai.v2.schema import OpenAIInputMessageSchema, OpenAIResponsesRequestSchema
 from ai_review.config import settings
@@ -23,6 +27,8 @@ class OpenAILLMClient(LLMClientProtocol):
             max_tokens=self.meta.max_tokens,
             temperature=self.meta.temperature,
             response_format={"type": "json_object"} if json_mode else None,
+            stream=self.meta.stream,
+            stream_options=OpenAIStreamOptionsSchema() if self.meta.stream else None,
         )
         response = await self.http_client_v1.chat(request)
         return ChatResultSchema(

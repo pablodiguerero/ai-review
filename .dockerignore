@@ -1,0 +1,10 @@
+.git
+.github
+.idea
+.pytest_cache
+**/__pycache__
+**/*.egg-info
+artifacts
+.ai-review.yaml
+.ai-review.json
+.env

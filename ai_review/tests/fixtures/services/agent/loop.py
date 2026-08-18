@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 
+from ai_review.services.agent.loop.service import AgentVerificationAborted
 from ai_review.services.agent.loop.schema import AgentLoopResultSchema
 from ai_review.services.agent.loop.service import AgentLoopService
 from ai_review.services.agent.loop.types import AgentLoopServiceProtocol
@@ -19,6 +20,9 @@ class FakeAgentLoopService(AgentLoopServiceProtocol):
         self.calls.append(("run", {"prompt": prompt, "prompt_system": prompt_system}))
         if self.responses.get("raise"):
             raise RuntimeError("agent failed")
+
+        if self.responses.get("abort"):
+            raise AgentVerificationAborted("agent aborted after 0/2 verification commands")
 
         return self.responses.get(
             "run",

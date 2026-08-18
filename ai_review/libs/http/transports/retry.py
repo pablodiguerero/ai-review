@@ -35,13 +35,23 @@ class RetryTransport(AsyncBaseTransport):
             if last_response.status_code not in self.retry_status_codes:
                 return last_response
 
+            if attempt == self.max_retries - 1:
+                break
+
             self.logger.warning(
                 f"Attempt {attempt + 1}/{self.max_retries} failed "
                 f"with status={last_response.status_code} for {request.method} {request.url}. "
                 f"Retrying in {self.retry_delay:.1f}s..."
             )
 
+            # The discarded response still owns its connection; a streaming one
+            # would hold it out of the pool for the rest of the run. The response
+            # returned below is deliberately left open for the caller to read.
+            await last_response.aclose()
             await asyncio.sleep(self.retry_delay)
+
+        if last_response is None:
+            raise RuntimeError(f"RetryTransport made no attempt for {request.method} {request.url}")
 
         self.logger.error(
             f"All {self.max_retries} attempts failed for "

@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from ai_review.libs.config.llm.openai import OpenAIMetaConfig
 
@@ -26,3 +27,12 @@ def test_is_v2_model_default_false():
     assert meta.model == "gpt-4o-mini"
     assert meta.is_v2_model is False
     assert meta.max_tokens is None
+
+
+def test_openai_meta_config_rejects_stream_for_responses_api_models():
+    with pytest.raises(ValidationError, match="Streaming is not implemented"):
+        OpenAIMetaConfig(model="gpt-5", stream=True)
+
+
+def test_openai_meta_config_allows_stream_for_chat_api_models():
+    assert OpenAIMetaConfig(model="deepseek-v4-flash", stream=True).stream is True

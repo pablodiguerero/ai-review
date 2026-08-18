@@ -15,6 +15,10 @@ from ai_review.services.prompt.types import PromptServiceProtocol
 logger = get_logger("AGENT_LOOP_SERVICE")
 
 
+class AgentVerificationAborted(Exception):
+    """The loop stopped before it verified anything, so there is no review to make."""
+
+
 class AgentLoopService(AgentLoopServiceProtocol):
     def __init__(
             self,
@@ -195,7 +199,25 @@ class AgentLoopService(AgentLoopServiceProtocol):
                 f"traces={len(self.traces)})"
             )
             
-            result = await self._chat(agent_prompt, agent_prompt_system)
+            try:
+                result = await self._chat(agent_prompt, agent_prompt_system)
+            except Exception as error:
+                if tool_calls < self.min_tool_calls:
+                    logger.error(
+                        f"Agent loop iteration {iteration} failed ({error}) after only "
+                        f"{tool_calls}/{self.min_tool_calls} verification commands; aborting"
+                    )
+                    raise AgentVerificationAborted(
+                        f"Agent aborted after {tool_calls}/{self.min_tool_calls} "
+                        f"verification commands: {error}"
+                    ) from error
+
+                logger.warning(
+                    f"Agent loop iteration {iteration} failed ({error}); "
+                    f"switching to force-final flow with {len(self.traces)} traces kept"
+                )
+                break
+
             logger.debug(f"Agent LLM response at iteration {iteration}: {result.text[:500]}")
 
             step: AgentStepSchema | None = self.parser.parse_output(result.text)

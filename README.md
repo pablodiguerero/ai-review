@@ -127,6 +127,7 @@ llm:
     model: gpt-4o-mini
     max_tokens: 1200
     temperature: 0.3
+    stream: false   # true for gateways that only serve streaming responses (OPENAI provider, chat API models)
 
   http_client:
     timeout: 120
