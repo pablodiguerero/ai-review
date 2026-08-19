@@ -1,5 +1,6 @@
 import pytest
 
+from ai_review.config import settings
 from ai_review.services.review.internal.summary.schema import SummaryCommentSchema
 from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.review.runner.summary import SummaryReviewRunner
@@ -40,7 +41,33 @@ async def test_run_happy_path(
     assert any(call[0] == "ask" for call in fake_review_direct_llm_gateway.calls)
     assert any(call[0] == "process_summary_comment" for call in fake_review_comment_gateway.calls)
 
+    process_call = next(
+        call for call in fake_review_comment_gateway.calls
+        if call[0] == "process_summary_comment"
+    )
+    assert process_call[1]["previous"] == []
+
     assert any(call[0] == "aggregate" for call in fake_cost_service.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_passes_existing_comments_as_previous_when_feedback_loop_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        summary_review_runner: SummaryReviewRunner,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    monkeypatch.setattr(settings.review, "summary_feedback_loop", True)
+    existing = [ReviewCommentSchema(id="1", body="#ai-review-summary existing")]
+    fake_review_comment_gateway.responses["get_summary_comments"] = existing
+
+    outcome = await summary_review_runner.run()
+
+    assert outcome == ReviewOutcome.POSTED
+    process_call = next(
+        call for call in fake_review_comment_gateway.calls
+        if call[0] == "process_summary_comment"
+    )
+    assert process_call[1]["previous"] == existing
 
 
 @pytest.mark.asyncio

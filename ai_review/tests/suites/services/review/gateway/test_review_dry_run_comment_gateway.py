@@ -18,7 +18,6 @@ async def test_process_inline_reply_dry_run_logs_and_no_vcs_calls(
         fake_artifacts_service: FakeArtifactsService,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway
 ):
-    """Dry-run: should log the inline reply but not call VCS."""
     reply = InlineCommentReplySchema(message="AI reply dry-run")
     await review_dry_run_comment_gateway.process_inline_reply("t1", reply)
     output = capsys.readouterr().out
@@ -37,7 +36,6 @@ async def test_process_summary_reply_dry_run_logs_and_no_vcs_calls(
         fake_artifacts_service: FakeArtifactsService,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway
 ):
-    """Dry-run: should log the summary reply but not call VCS."""
     reply = SummaryCommentReplySchema(text="Dry-run summary reply")
     await review_dry_run_comment_gateway.process_summary_reply("t2", reply)
     output = capsys.readouterr().out
@@ -56,7 +54,6 @@ async def test_process_inline_comment_dry_run_logs_and_no_vcs_calls(
         fake_artifacts_service: FakeArtifactsService,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway
 ):
-    """Dry-run: should log inline comment without creating one."""
     comment = InlineCommentSchema(file="a.py", line=10, message="Test comment")
     await review_dry_run_comment_gateway.process_inline_comment(comment)
     output = capsys.readouterr().out
@@ -76,7 +73,6 @@ async def test_process_summary_comment_dry_run_logs_and_no_vcs_calls(
         fake_artifacts_service: FakeArtifactsService,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway
 ):
-    """Dry-run: should log summary comment but not send it."""
     comment = SummaryCommentSchema(text="Dry-run summary comment")
     await review_dry_run_comment_gateway.process_summary_comment(comment)
     output = capsys.readouterr().out
@@ -89,13 +85,39 @@ async def test_process_summary_comment_dry_run_logs_and_no_vcs_calls(
 
 
 @pytest.mark.asyncio
+async def test_process_summary_comment_dry_run_logs_update_and_delete_when_replace_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture,
+        fake_vcs_client: FakeVCSClient,
+        fake_artifacts_service: FakeArtifactsService,
+        review_dry_run_comment_gateway: ReviewDryRunCommentGateway,
+):
+    monkeypatch.setattr(settings.review, "summary_replace_previous", True)
+
+    comment = SummaryCommentSchema(text="Dry-run summary comment v2")
+    previous = [
+        ReviewCommentSchema(id="10", body="old-1"),
+        ReviewCommentSchema(id="11", body="old-2-latest"),
+    ]
+
+    await review_dry_run_comment_gateway.process_summary_comment(comment, previous=previous)
+    output = capsys.readouterr().out
+
+    assert "[dry-run] Would update summary comment 11 / delete 1 older" in output
+    assert not any(call[0].startswith("create_") for call in fake_vcs_client.calls)
+    assert not any(call[0].startswith("update_") for call in fake_vcs_client.calls)
+    assert not any(call[0].startswith("delete_") for call in fake_vcs_client.calls)
+
+    assert ("save_vcs_summary", {"comment": comment}) in fake_artifacts_service.calls
+
+
+@pytest.mark.asyncio
 async def test_process_inline_comments_iterates_all(
         capsys: pytest.CaptureFixture,
         fake_vcs_client: FakeVCSClient,
         fake_artifacts_service: FakeArtifactsService,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway
 ):
-    """Dry-run: should iterate through all inline comments and log each."""
     comments = InlineCommentListSchema(root=[
         InlineCommentSchema(file="a.py", line=1, message="C1"),
         InlineCommentSchema(file="b.py", line=2, message="C2"),
@@ -118,7 +140,6 @@ async def test_clear_inline_comments_dry_run_no_comments(
         fake_vcs_client: FakeVCSClient,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway,
 ):
-    """Dry-run: should log and do nothing when no inline comments exist."""
     fake_vcs_client.responses["get_inline_comments"] = []
 
     await review_dry_run_comment_gateway.clear_inline_comments()
@@ -134,7 +155,6 @@ async def test_clear_inline_comments_dry_run_logs_each_comment(
         fake_vcs_client: FakeVCSClient,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway,
 ):
-    """Dry-run: should log deletion of each inline comment without calling VCS."""
     fake_vcs_client.responses["get_inline_comments"] = [
         ReviewCommentSchema(id="1", body=f"{settings.review.inline_tag} AI inline"),
         ReviewCommentSchema(id="2", body=f"{settings.review.inline_tag} AI inline"),
@@ -156,7 +176,6 @@ async def test_clear_summary_comments_dry_run_no_comments(
         fake_vcs_client: FakeVCSClient,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway,
 ):
-    """Dry-run: should log and do nothing when no summary comments exist."""
     fake_vcs_client.responses["get_general_comments"] = []
 
     await review_dry_run_comment_gateway.clear_summary_comments()
@@ -172,7 +191,6 @@ async def test_clear_summary_comments_dry_run_logs_each_comment(
         fake_vcs_client: FakeVCSClient,
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway,
 ):
-    """Dry-run: should log deletion of each summary comment without calling VCS."""
     fake_vcs_client.responses["get_general_comments"] = [
         ReviewCommentSchema(id="10", body=f"{settings.review.summary_tag} First AI summary"),
         ReviewCommentSchema(id="11", body=f"{settings.review.summary_tag} Second AI summary"),

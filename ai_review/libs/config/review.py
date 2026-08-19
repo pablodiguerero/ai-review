@@ -35,3 +35,6 @@ class ReviewConfig(BaseModel):
     max_context_comments: int | None = None
     inline_comment_fallback: bool = True
     fail_on_empty_result: bool = False
+    summary_header: str = Field(default="")
+    summary_replace_previous: bool = Field(default=False)
+    summary_normalize_tables: bool = Field(default=True)

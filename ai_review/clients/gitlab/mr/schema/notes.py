@@ -27,3 +27,12 @@ class GitLabCreateMRNoteRequestSchema(BaseModel):
 class GitLabCreateMRNoteResponseSchema(BaseModel):
     id: int
     body: str
+
+
+class GitLabUpdateMRNoteRequestSchema(BaseModel):
+    body: str
+
+
+class GitLabUpdateMRNoteResponseSchema(BaseModel):
+    id: int
+    body: str

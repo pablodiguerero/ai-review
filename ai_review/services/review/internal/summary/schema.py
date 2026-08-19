@@ -12,6 +12,11 @@ class SummaryCommentSchema(BaseModel):
 
     @property
     def body_with_tag(self) -> str:
+        header = settings.review.summary_header
+        if header:
+            rendered_header = header.format(model=settings.llm.meta.model)
+            return f"{rendered_header}\n\n{self.text}\n\n{settings.review.summary_tag}"
+
         return f"{self.text}\n\n{settings.review.summary_tag}"
 
     @property

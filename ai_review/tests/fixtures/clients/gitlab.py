@@ -18,6 +18,7 @@ from ai_review.clients.gitlab.mr.schema.notes import (
     GitLabNoteSchema,
     GitLabGetMRNotesResponseSchema,
     GitLabCreateMRNoteResponseSchema,
+    GitLabUpdateMRNoteResponseSchema,
 )
 from ai_review.clients.gitlab.mr.schema.position import GitLabPositionSchema
 from ai_review.clients.gitlab.mr.types import GitLabMergeRequestsHTTPClientProtocol
@@ -166,6 +167,26 @@ class FakeGitLabMergeRequestsHTTPClient(GitLabMergeRequestsHTTPClientProtocol):
             )
         )
         return GitLabCreateMRDiscussionReplyResponseSchema(id=100, body=body)
+
+    async def update_note(
+            self,
+            project_id: str,
+            merge_request_id: str,
+            note_id: str,
+            body: str,
+    ) -> GitLabUpdateMRNoteResponseSchema:
+        self.calls.append(
+            (
+                "update_note",
+                {
+                    "project_id": project_id,
+                    "merge_request_id": merge_request_id,
+                    "note_id": note_id,
+                    "body": body,
+                },
+            )
+        )
+        return GitLabUpdateMRNoteResponseSchema(id=int(note_id), body=body)
 
     async def delete_note(self, project_id: str, merge_request_id: str, note_id: str) -> None:
         self.calls.append(

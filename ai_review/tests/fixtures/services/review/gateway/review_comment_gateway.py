@@ -98,8 +98,12 @@ class FakeReviewCommentGateway(ReviewCommentGatewayProtocol):
     async def process_inline_comment(self, comment: InlineCommentSchema) -> None:
         self.calls.append(("process_inline_comment", {"comment": comment}))
 
-    async def process_summary_comment(self, comment: SummaryCommentSchema) -> None:
-        self.calls.append(("process_summary_comment", {"comment": comment}))
+    async def process_summary_comment(
+            self,
+            comment: SummaryCommentSchema,
+            previous: list[ReviewCommentSchema] | None = None,
+    ) -> None:
+        self.calls.append(("process_summary_comment", {"comment": comment, "previous": previous}))
 
     async def process_inline_comments(self, comments: InlineCommentListSchema) -> None:
         self.calls.append(("process_inline_comments", {"comments": comments}))

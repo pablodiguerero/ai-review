@@ -17,7 +17,6 @@ async def test_get_review_info_returns_valid_schema(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should return detailed PR info with branches, author, and files."""
     info = await github_vcs_client.get_review_info()
 
     assert isinstance(info, ReviewInfoSchema)
@@ -47,7 +46,6 @@ async def test_get_general_comments_returns_expected_list(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should return general (issue-level) comments."""
     comments = await github_vcs_client.get_general_comments()
 
     assert all(isinstance(c, ReviewCommentSchema) for c in comments)
@@ -67,7 +65,6 @@ async def test_get_inline_comments_returns_expected_list(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should return inline comments with file and line references."""
     comments = await github_vcs_client.get_inline_comments()
 
     assert all(isinstance(c, ReviewCommentSchema) for c in comments)
@@ -88,7 +85,6 @@ async def test_create_general_comment_posts_comment(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should post a general (non-inline) comment."""
     message = "Hello from test!"
 
     await github_vcs_client.create_general_comment(message)
@@ -107,7 +103,6 @@ async def test_create_inline_comment_posts_comment(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should post an inline comment with correct path, line and commit_id."""
     await github_vcs_client.create_inline_comment("file.py", 10, "Looks good")
 
     calls = [args for name, args in fake_github_pull_requests_http_client.calls if name == "create_review_comment"]
@@ -126,7 +121,6 @@ async def test_create_inline_reply_posts_comment(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should post a reply to an existing inline comment."""
     thread_id = 3
     message = "I agree with this suggestion."
 
@@ -149,7 +143,6 @@ async def test_create_summary_reply_reuses_general_comment_method(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should call create_issue_comment internally (since GitHub summary comments are flat)."""
     thread_id = 11
     message = "Thanks for clarifying."
 
@@ -170,11 +163,10 @@ async def test_get_inline_threads_returns_grouped_threads(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should group inline review comments into threads by file and line."""
     threads = await github_vcs_client.get_inline_threads()
 
     assert all(isinstance(t, ReviewThreadSchema) for t in threads)
-    assert len(threads) == 2  # 2 comments with unique IDs
+    assert len(threads) == 2
 
     first = threads[0]
     assert first.kind == ThreadKind.INLINE
@@ -192,7 +184,6 @@ async def test_get_general_threads_wraps_comments_in_threads(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should wrap each general comment as a separate SUMMARY thread."""
     threads = await github_vcs_client.get_general_threads()
 
     assert all(isinstance(thread, ReviewThreadSchema) for thread in threads)
@@ -220,7 +211,6 @@ async def test_delete_general_comment_calls_delete_issue_comment(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should delete a general (issue-level) comment by id."""
     comment_id = 101
 
     await github_vcs_client.delete_general_comment(comment_id)
@@ -239,11 +229,36 @@ async def test_delete_general_comment_calls_delete_issue_comment(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("github_http_client_config")
+async def test_update_general_comment_deletes_then_creates(
+        github_vcs_client: GitHubVCSClient,
+        fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
+):
+    comment_id = 101
+    message = "Updated review body"
+
+    await github_vcs_client.update_general_comment(comment_id, message)
+
+    called_names = [name for name, _ in fake_github_pull_requests_http_client.calls]
+    assert called_names == ["delete_issue_comment", "create_issue_comment"]
+
+    delete_call = next(
+        args for name, args in fake_github_pull_requests_http_client.calls
+        if name == "delete_issue_comment"
+    )
+    create_call = next(
+        args for name, args in fake_github_pull_requests_http_client.calls
+        if name == "create_issue_comment"
+    )
+    assert delete_call["comment_id"] == str(comment_id)
+    assert create_call["body"] == message
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("github_http_client_config")
 async def test_delete_inline_comment_calls_delete_review_comment(
         github_vcs_client: GitHubVCSClient,
         fake_github_pull_requests_http_client: FakeGitHubPullRequestsHTTPClient,
 ):
-    """Should delete an inline review comment by id."""
     comment_id = "555"
 
     await github_vcs_client.delete_inline_comment(comment_id)

@@ -83,8 +83,24 @@ for the OpenCode Go gateway:
   to review still exits `0`.
 - `AGENT__MAX_COMMAND_OUTPUT_CHARS` default changed from `40000` to `8000`.
 - `AGENT__ALLOW_COMMANDS` default gained read-only `head`, `tail`, `wc`, `sed -n 'A,Bp' FILE`, and `find` (without
-  its mutating flags) patterns. Regardless of the allowlist, unquoted shell operators (`|`, `&&`, `;`, `>`, etc.)
-  and newlines inside a command are always rejected.
+  its mutating flags) patterns. Regardless of the allowlist, unquoted shell operators (`|`, `&&`, `;`, `>`, etc.),
+  newlines, and `/proc/` or `/dev/` paths inside a command are always rejected.
+- `REVIEW__SUMMARY_HEADER` (string, default `""`) and `REVIEW__SUMMARY_REPLACE_PREVIOUS` (bool, default `false`)
+  together keep one summary comment per model per MR across reruns instead of piling up duplicates.
+  `REVIEW__SUMMARY_HEADER` is a `str.format`-style template rendered with `model=<LLM__META__MODEL>` and prepended
+  to the summary body when non-empty, e.g. `REVIEW__SUMMARY_HEADER="### AI review: {model}"` labels the comment
+  with the model that wrote it — useful when several jobs (different models) each post their own summary to the
+  same MR. `REVIEW__SUMMARY_REPLACE_PREVIOUS=true` makes the summary runner update its own most recent prior
+  comment (matched by the `REVIEW__SUMMARY_TAG`) in place instead of creating a new one, and delete any older
+  duplicates from earlier runs; if the VCS can't update a comment in place, it falls back to creating a new one.
+  On GitLab this edits the note directly; on GitHub, Gitea, Bitbucket Cloud/Server, and Azure DevOps — which have
+  no note-update API — it deletes the old comment and creates a new one.
+- `REVIEW__SUMMARY_NORMALIZE_TABLES` (bool, default `true`) — before posting, the summary text is passed through a
+  deterministic Markdown-table fixer that turns pipe-separated lines lacking outer pipes and/or a `| --- | --- |`
+  separator row into valid GFM tables (padding short rows, trimming long ones, and inserting exactly one blank line
+  before/after the table), so tables like a "Clean Code Evaluation Table" render correctly on GitLab/GitHub instead
+  of as raw pipe-separated text. Content inside fenced ` ``` ` code blocks is never touched. Set to `false` to post
+  the model's raw Markdown unchanged.
 
 `LLM__HTTP_CLIENT__CONNECT_TIMEOUT` is honoured by the OpenAI-compatible clients only; other providers ignore it.
 

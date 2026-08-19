@@ -16,6 +16,8 @@ from ai_review.clients.gitlab.mr.schema.notes import (
     GitLabGetMRNotesResponseSchema,
     GitLabCreateMRNoteRequestSchema,
     GitLabCreateMRNoteResponseSchema,
+    GitLabUpdateMRNoteRequestSchema,
+    GitLabUpdateMRNoteResponseSchema,
 )
 from ai_review.clients.gitlab.mr.types import GitLabMergeRequestsHTTPClientProtocol
 from ai_review.clients.gitlab.tools import gitlab_has_next_page
@@ -94,6 +96,19 @@ class GitLabMergeRequestsHTTPClient(HTTPClient, GitLabMergeRequestsHTTPClientPro
     ) -> Response:
         return await self.post(
             f"/api/v4/projects/{project_id}/merge_requests/{merge_request_id}/discussions/{discussion_id}/notes",
+            json=request.model_dump(),
+        )
+
+    @handle_http_error(client="GitLabMergeRequestsHTTPClient", exception=GitLabMergeRequestsHTTPClientError)
+    async def update_note_api(
+            self,
+            project_id: str,
+            merge_request_id: str,
+            note_id: str,
+            request: GitLabUpdateMRNoteRequestSchema,
+    ) -> Response:
+        return await self.put(
+            f"/api/v4/projects/{project_id}/merge_requests/{merge_request_id}/notes/{note_id}",
             json=request.model_dump(),
         )
 
@@ -191,6 +206,22 @@ class GitLabMergeRequestsHTTPClient(HTTPClient, GitLabMergeRequestsHTTPClientPro
             request=request,
         )
         return GitLabCreateMRDiscussionReplyResponseSchema.model_validate_json(response.text)
+
+    async def update_note(
+            self,
+            project_id: str,
+            merge_request_id: str,
+            note_id: str,
+            body: str,
+    ) -> GitLabUpdateMRNoteResponseSchema:
+        request = GitLabUpdateMRNoteRequestSchema(body=body)
+        response = await self.update_note_api(
+            project_id=project_id,
+            merge_request_id=merge_request_id,
+            note_id=note_id,
+            request=request,
+        )
+        return GitLabUpdateMRNoteResponseSchema.model_validate_json(response.text)
 
     async def delete_note(self, project_id: str, merge_request_id: str, note_id: str) -> None:
         await self.delete_note_api(project_id, merge_request_id, note_id)

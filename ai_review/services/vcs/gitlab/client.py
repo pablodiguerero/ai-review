@@ -24,7 +24,6 @@ class GitLabVCSClient(VCSClientProtocol):
         self.merge_request_id = settings.vcs.pipeline.merge_request_id
         self.merge_request_ref = f"project_id={self.project_id} merge_request_id={self.merge_request_id}"
 
-    # --- Review info ---
     async def get_review_info(self) -> ReviewInfoSchema:
         try:
             response = await self.http_client.mr.get_changes(
@@ -70,7 +69,6 @@ class GitLabVCSClient(VCSClientProtocol):
             logger.exception(f"Failed to fetch MR info for {self.merge_request_ref}: {error}")
             return ReviewInfoSchema()
 
-    # --- Comments ---
     async def get_general_comments(self) -> list[ReviewCommentSchema]:
         try:
             response = await self.http_client.mr.get_notes(
@@ -120,6 +118,20 @@ class GitLabVCSClient(VCSClientProtocol):
             logger.info(f"Created general comment in {self.merge_request_ref}")
         except Exception as error:
             logger.exception(f"Failed to create general comment in {self.merge_request_ref}: {error}")
+            raise
+
+    async def update_general_comment(self, comment_id: int | str, message: str) -> None:
+        try:
+            logger.info(f"Updating general comment {comment_id=} in {self.merge_request_ref}: {message}")
+            await self.http_client.mr.update_note(
+                project_id=self.project_id,
+                merge_request_id=self.merge_request_id,
+                note_id=str(comment_id),
+                body=message,
+            )
+            logger.info(f"Updated general comment {comment_id=} in {self.merge_request_ref}")
+        except Exception as error:
+            logger.exception(f"Failed to update general comment {comment_id=} in {self.merge_request_ref}: {error}")
             raise
 
     async def create_inline_comment(self, file: str, line: int, message: str) -> None:
@@ -180,7 +192,6 @@ class GitLabVCSClient(VCSClientProtocol):
             )
             raise
 
-    # --- Replies ---
     async def create_inline_reply(self, thread_id: str | int, message: str) -> None:
         try:
             logger.info(f"Replying to discussion {thread_id=} in MR {self.merge_request_ref}")

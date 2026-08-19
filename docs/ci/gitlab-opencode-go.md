@@ -72,6 +72,7 @@ keeps a timeout advisory rather than blocking).
     AI_REVIEW_SUMMARY_TAG: "#ai-review-summary"
     AI_REVIEW_SUMMARY_REPLY_TAG: "#ai-review-reply"
     AI_REVIEW_FAIL_ON_EMPTY: "false"
+    AI_REVIEW_SUMMARY_HEADER: "### AI review: {model}"
   script: |
     if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]; then
       git fetch --no-tags --depth=1 origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" 2>/dev/null || true
@@ -101,6 +102,8 @@ keeps a timeout advisory rather than blocking).
       -e REVIEW__SUMMARY_REPLY_TAG="$AI_REVIEW_SUMMARY_REPLY_TAG" \
       -e REVIEW__SUMMARY_FEEDBACK_LOOP="true" \
       -e REVIEW__FAIL_ON_EMPTY_RESULT="$AI_REVIEW_FAIL_ON_EMPTY" \
+      -e REVIEW__SUMMARY_HEADER="$AI_REVIEW_SUMMARY_HEADER" \
+      -e REVIEW__SUMMARY_REPLACE_PREVIOUS="true" \
       -e PROMPT__SUMMARY_PROMPT_FILES='["./.ai-review/prompts/summary.md", "./.ai-review/prompts/verify.md"]' \
       -e AGENT__ENABLED="true" \
       -e AGENT__MAX_ITERATIONS="30" \

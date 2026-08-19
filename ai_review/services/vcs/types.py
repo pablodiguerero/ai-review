@@ -55,50 +55,38 @@ class ReviewThreadSchema(BaseModel):
 
 
 class VCSClientProtocol(Protocol):
-    """
-    Unified interface for version control system integrations (GitHub, GitLab, Bitbucket, etc.).
-    Designed for code review automation: fetching review info, comments, and posting feedback.
-    """
-
-    # --- Review info ---
     async def get_review_info(self) -> ReviewInfoSchema:
-        """Fetch general information about the current review (PR/MR)."""
+        ...
 
-    # --- Comments ---
     async def get_general_comments(self) -> list[ReviewCommentSchema]:
-        """Fetch all top-level (non-inline) comments."""
+        ...
 
     async def get_inline_comments(self) -> list[ReviewCommentSchema]:
-        """Fetch inline (file + line attached) comments."""
+        ...
 
     async def create_general_comment(self, message: str) -> None:
-        """Post a top-level comment."""
+        ...
 
     async def create_inline_comment(self, file: str, line: int, message: str) -> None:
-        """Post a comment attached to a specific line in file."""
+        ...
+
+    async def update_general_comment(self, comment_id: int | str, message: str) -> None:
+        ...
 
     async def delete_general_comment(self, comment_id: int | str) -> None:
-        """Delete a top-level (general / summary) review comment by its identifier."""
+        ...
 
     async def delete_inline_comment(self, comment_id: int | str) -> None:
-        """Delete an inline (file + line attached) review comment by its identifier."""
+        ...
 
-    # --- Replies ---
     async def create_inline_reply(self, thread_id: int | str, message: str) -> None:
-        """Reply to an existing inline comment thread."""
+        ...
 
     async def create_summary_reply(self, thread_id: int | str, message: str) -> None:
-        """Reply to a summary/general comment (flat if VCS doesn't support threads)."""
+        ...
 
-    # --- Threads ---
     async def get_inline_threads(self) -> list[ReviewThreadSchema]:
-        """
-        Fetch grouped inline comment threads.
-        If VCS doesn't support threads natively, group by file+line.
-        """
+        ...
 
     async def get_general_threads(self) -> list[ReviewThreadSchema]:
-        """
-        Fetch grouped general (summary-level) comment threads.
-        If VCS is flat (e.g. GitHub issues), each comment is a separate thread.
-        """
+        ...

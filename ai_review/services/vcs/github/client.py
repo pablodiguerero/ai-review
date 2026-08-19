@@ -32,7 +32,6 @@ class GitHubVCSClient(VCSClientProtocol):
         self.pull_number = settings.vcs.pipeline.pull_number
         self.pull_request_ref = f"{self.owner}/{self.repo}#{self.pull_number}"
 
-    # --- Review info ---
     async def get_review_info(self) -> ReviewInfoSchema:
         try:
             pr = await self.http_client.pr.get_pull_request(
@@ -82,7 +81,6 @@ class GitHubVCSClient(VCSClientProtocol):
             )
             return ReviewInfoSchema()
 
-    # --- Comments ---
     async def get_general_comments(self) -> list[ReviewCommentSchema]:
         try:
             response = await self.http_client.pr.get_issue_comments(
@@ -123,6 +121,16 @@ class GitHubVCSClient(VCSClientProtocol):
             logger.info(f"Created general comment in PR {self.pull_request_ref}")
         except Exception as error:
             logger.exception(f"Failed to create general comment in PR {self.pull_request_ref}: {error}")
+            raise
+
+    async def update_general_comment(self, comment_id: int | str, message: str) -> None:
+        try:
+            logger.info(f"Updating general comment {comment_id=} in PR {self.pull_request_ref} (delete + create)")
+            await self.delete_general_comment(comment_id)
+            await self.create_general_comment(message)
+            logger.info(f"Updated general comment {comment_id=} in PR {self.pull_request_ref}")
+        except Exception as error:
+            logger.exception(f"Failed to update general comment {comment_id=} in PR {self.pull_request_ref}: {error}")
             raise
 
     async def create_inline_comment(self, file: str, line: int, message: str) -> None:
@@ -178,7 +186,6 @@ class GitHubVCSClient(VCSClientProtocol):
             )
             raise
 
-    # --- Replies ---
     async def create_inline_reply(self, thread_id: int | str, message: str) -> None:
         try:
             logger.info(f"Replying to inline comment {thread_id=} in PR {self.pull_request_ref}")
@@ -200,10 +207,6 @@ class GitHubVCSClient(VCSClientProtocol):
             raise
 
     async def create_summary_reply(self, thread_id: int | str, message: str) -> None:
-        """
-        GitHub does not support threaded replies for issue-level comments.
-        We post a new top-level comment instead.
-        """
         try:
             logger.info(f"Replying to general comment {thread_id=} in PR {self.pull_request_ref}")
             await self.create_general_comment(message)
@@ -213,7 +216,6 @@ class GitHubVCSClient(VCSClientProtocol):
             )
             raise
 
-    # --- Threads ---
     async def get_inline_threads(self) -> list[ReviewThreadSchema]:
         try:
             response = await self.http_client.pr.get_review_comments(

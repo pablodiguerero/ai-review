@@ -44,6 +44,13 @@ class FakeVCSClient(VCSClientProtocol):
 
         return self.responses.get("create_inline_comment_result", None)
 
+    async def update_general_comment(self, comment_id: int | str, message: str) -> None:
+        self.calls.append(("update_general_comment", (comment_id, message), {}))
+        if error := self.responses.get("update_general_comment_error"):
+            raise error
+
+        return self.responses.get("update_general_comment_result", None)
+
     async def delete_general_comment(self, comment_id: int | str) -> None:
         self.calls.append(("delete_general_comment", (comment_id,), {}))
         if error := self.responses.get("delete_general_comment_error"):

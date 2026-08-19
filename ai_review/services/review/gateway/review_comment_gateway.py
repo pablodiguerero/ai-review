@@ -108,10 +108,33 @@ class ReviewCommentGateway(ReviewCommentGatewayProtocol):
             logger.exception(f"Failed to process inline fallback comment: {comment} — {error}")
             await hook.emit_summary_comment_error(comment)
 
-    async def process_summary_comment(self, comment: SummaryCommentSchema) -> None:
+    async def process_summary_comment(
+            self,
+            comment: SummaryCommentSchema,
+            previous: list[ReviewCommentSchema] | None = None,
+    ) -> None:
         try:
             await hook.emit_summary_comment_start(comment)
-            await self.vcs.create_general_comment(comment.body_with_tag)
+
+            if settings.review.summary_replace_previous and previous:
+                latest = previous[-1]
+                older = previous[:-1]
+
+                try:
+                    await self.vcs.update_general_comment(latest.id, comment.body_with_tag)
+                    logger.info(f"Updated summary comment {latest.id}")
+                except Exception as error:
+                    logger.exception(
+                        f"Failed to update summary comment {latest.id}, falling back to create: {error}"
+                    )
+                    await self.vcs.create_general_comment(comment.body_with_tag)
+
+                if older:
+                    logger.info(f"Deleting {len(older)} older summary comment(s)")
+                    await bounded_gather([self.vcs.delete_general_comment(c.id) for c in older])
+            else:
+                await self.vcs.create_general_comment(comment.body_with_tag)
+
             await hook.emit_summary_comment_complete(comment)
 
             await self.artifacts.save_vcs_summary(comment)

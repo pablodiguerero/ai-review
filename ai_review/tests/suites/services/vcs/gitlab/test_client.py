@@ -11,7 +11,6 @@ async def test_get_review_info_returns_valid_schema(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should return valid MR info with author, branches and changed files."""
     info = await gitlab_vcs_client.get_review_info()
 
     assert isinstance(info, ReviewInfoSchema)
@@ -42,7 +41,6 @@ async def test_get_general_comments_returns_expected_list(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should return general MR-level notes."""
     comments = await gitlab_vcs_client.get_general_comments()
 
     assert all(isinstance(c, ReviewCommentSchema) for c in comments)
@@ -71,7 +69,6 @@ async def test_get_inline_comments_returns_expected_list(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should return inline comments from MR discussions (including ones without position)."""
     comments = await gitlab_vcs_client.get_inline_comments()
 
     assert all(isinstance(c, ReviewCommentSchema) for c in comments)
@@ -96,7 +93,6 @@ async def test_create_general_comment_posts_comment(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should post a general note to MR."""
     message = "Hello, GitLab!"
 
     await gitlab_vcs_client.create_general_comment(message)
@@ -119,7 +115,6 @@ async def test_create_inline_comment_posts_comment(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should create an inline discussion at specific file and line."""
     await gitlab_vcs_client.create_inline_comment("main.py", 5, "Looks good!")
 
     called_names = [name for name, _ in fake_gitlab_merge_requests_http_client.calls]
@@ -144,7 +139,6 @@ async def test_create_inline_reply_posts_comment(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should reply to an existing inline discussion."""
     thread_id = "discussion-1"
     message = "I agree with this point."
 
@@ -167,7 +161,6 @@ async def test_create_summary_reply_uses_general_comment_method(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should reuse create_general_comment when replying to summary thread."""
     thread_id = "summary-1"
     message = "Thanks for clarifying."
 
@@ -189,7 +182,6 @@ async def test_get_inline_threads_returns_valid_schema(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should transform GitLab discussions into inline threads, including those without position."""
     threads = await gitlab_vcs_client.get_inline_threads()
 
     assert all(isinstance(thread, ReviewThreadSchema) for thread in threads)
@@ -219,7 +211,6 @@ async def test_get_general_threads_wraps_comments_in_threads(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should wrap each general MR note into its own SUMMARY thread."""
     threads = await gitlab_vcs_client.get_general_threads()
 
     assert len(threads) == 2
@@ -239,7 +230,6 @@ async def test_delete_general_comment_calls_delete_note(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should delete a general MR-level comment by note id."""
     comment_id = 123
 
     await gitlab_vcs_client.delete_general_comment(comment_id)
@@ -262,7 +252,6 @@ async def test_delete_inline_comment_calls_delete_discussion(
         gitlab_vcs_client: GitLabVCSClient,
         fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
 ):
-    """Should delete an inline discussion by discussion id."""
     note_id = "discussion-42"
 
     await gitlab_vcs_client.delete_inline_comment(note_id)
@@ -275,5 +264,29 @@ async def test_delete_inline_comment_calls_delete_discussion(
 
     call_args = calls[0]
     assert call_args["note_id"] == str(note_id)
+    assert call_args["project_id"] == "project-id"
+    assert call_args["merge_request_id"] == "merge-request-id"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("gitlab_http_client_config")
+async def test_update_general_comment_calls_update_note(
+        gitlab_vcs_client: GitLabVCSClient,
+        fake_gitlab_merge_requests_http_client: FakeGitLabMergeRequestsHTTPClient,
+):
+    comment_id = 123
+    message = "Updated review body"
+
+    await gitlab_vcs_client.update_general_comment(comment_id, message)
+
+    calls = [
+        args for name, args in fake_gitlab_merge_requests_http_client.calls
+        if name == "update_note"
+    ]
+    assert len(calls) == 1
+
+    call_args = calls[0]
+    assert call_args["note_id"] == str(comment_id)
+    assert call_args["body"] == message
     assert call_args["project_id"] == "project-id"
     assert call_args["merge_request_id"] == "merge-request-id"

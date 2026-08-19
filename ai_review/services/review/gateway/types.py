@@ -44,7 +44,11 @@ class ReviewCommentGatewayProtocol(Protocol):
     async def process_inline_comment(self, comment: InlineCommentSchema) -> None:
         ...
 
-    async def process_summary_comment(self, comment: SummaryCommentSchema) -> None:
+    async def process_summary_comment(
+            self,
+            comment: SummaryCommentSchema,
+            previous: list[ReviewCommentSchema] | None = None,
+    ) -> None:
         ...
 
     async def process_inline_comments(self, comments: InlineCommentListSchema) -> None:

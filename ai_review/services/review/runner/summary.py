@@ -107,6 +107,6 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
             return ReviewOutcome.EMPTY
 
         logger.info(f"Posting summary review comment ({len(summary.text)} chars)")
-        await self.review_comment_gateway.process_summary_comment(summary)
+        await self.review_comment_gateway.process_summary_comment(summary, previous=comments)
         await hook.emit_summary_review_complete(self.cost.aggregate())
         return ReviewOutcome.POSTED

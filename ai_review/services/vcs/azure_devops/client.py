@@ -35,7 +35,6 @@ class AzureDevOpsVCSClient(VCSClientProtocol):
             f"{self.organization}/{self.project}/{self.repository_id}#{self.pull_request_id}"
         )
 
-    # --- Review info ---
     async def get_review_info(self) -> ReviewInfoSchema:
         try:
             pr = await self.http_client.pr.get_pull_request(
@@ -96,7 +95,6 @@ class AzureDevOpsVCSClient(VCSClientProtocol):
             )
             return ReviewInfoSchema()
 
-    # --- Comments ---
     async def get_general_comments(self) -> list[ReviewCommentSchema]:
         try:
             response = await self.http_client.pr.get_threads(
@@ -167,6 +165,16 @@ class AzureDevOpsVCSClient(VCSClientProtocol):
 
         except Exception as error:
             logger.exception(f"Failed to create general comment in {self.pull_request_ref}: {error}")
+            raise
+
+    async def update_general_comment(self, comment_id: int | str, message: str) -> None:
+        try:
+            logger.info(f"Updating general comment {comment_id=} in PR {self.pull_request_ref} (delete + create)")
+            await self.delete_general_comment(comment_id)
+            await self.create_general_comment(message)
+            logger.info(f"Updated general comment {comment_id=} in PR {self.pull_request_ref}")
+        except Exception as error:
+            logger.exception(f"Failed to update general comment {comment_id=} in PR {self.pull_request_ref}: {error}")
             raise
 
     async def create_inline_comment(self, file: str, line: int, message: str) -> None:
@@ -253,7 +261,6 @@ class AzureDevOpsVCSClient(VCSClientProtocol):
             logger.exception(f"Failed to delete inline comment {comment_id=} in PR {self.pull_request_ref}: {error}")
             raise
 
-    # --- Replies ---
     async def create_inline_reply(self, thread_id: int | str, message: str) -> None:
         try:
             logger.info(f"Replying to inline thread {thread_id=} in PR {self.pull_request_ref}")
@@ -287,7 +294,6 @@ class AzureDevOpsVCSClient(VCSClientProtocol):
             )
             raise
 
-    # --- Threads ---
     async def get_inline_threads(self) -> list[ReviewThreadSchema]:
         try:
             response = await self.http_client.pr.get_threads(

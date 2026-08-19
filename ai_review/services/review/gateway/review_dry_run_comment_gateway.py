@@ -1,3 +1,4 @@
+from ai_review.config import settings
 from ai_review.libs.asynchronous.gather import bounded_gather
 from ai_review.libs.logger import get_logger
 from ai_review.services.artifacts.types import ArtifactsServiceProtocol
@@ -7,7 +8,7 @@ from ai_review.services.review.internal.inline.schema import InlineCommentListSc
 from ai_review.services.review.internal.inline_reply.schema import InlineCommentReplySchema
 from ai_review.services.review.internal.summary.schema import SummaryCommentSchema
 from ai_review.services.review.internal.summary_reply.schema import SummaryCommentReplySchema
-from ai_review.services.vcs.types import VCSClientProtocol
+from ai_review.services.vcs.types import VCSClientProtocol, ReviewCommentSchema
 
 logger = get_logger("REVIEW_DRY_RUN_COMMENT_GATEWAY")
 
@@ -40,9 +41,23 @@ class ReviewDryRunCommentGateway(ReviewCommentGateway):
 
         await self.artifacts.save_vcs_inline(comment)
 
-    async def process_summary_comment(self, comment: SummaryCommentSchema) -> None:
+    async def process_summary_comment(
+            self,
+            comment: SummaryCommentSchema,
+            previous: list[ReviewCommentSchema] | None = None,
+    ) -> None:
         await hook.emit_summary_comment_start(comment)
-        logger.info(f"[dry-run] Would create summary comment:\n{comment.body_with_tag}")
+
+        if settings.review.summary_replace_previous and previous:
+            latest = previous[-1]
+            older = previous[:-1]
+            logger.info(
+                f"[dry-run] Would update summary comment {latest.id} / delete {len(older)} older:\n"
+                f"{comment.body_with_tag}"
+            )
+        else:
+            logger.info(f"[dry-run] Would create summary comment:\n{comment.body_with_tag}")
+
         await hook.emit_summary_comment_complete(comment)
 
         await self.artifacts.save_vcs_summary(comment)
