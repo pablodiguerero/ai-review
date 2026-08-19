@@ -175,6 +175,7 @@ def test_should_agent_run_command_default_patterns_accept_new_read_only_commands
     assert PolicyService.should_agent_run_command("tail -n 5 file.py")
     assert PolicyService.should_agent_run_command("wc -l file.py")
     assert PolicyService.should_agent_run_command("sed -n '10,20p' x.py")
+    assert PolicyService.should_agent_run_command('sed -n "10,20p" x.py')
     assert PolicyService.should_agent_run_command("sed -n 10,20p x.py")
     assert PolicyService.should_agent_run_command("sed -n '5p' x.py")
     assert PolicyService.should_agent_run_command("find . -name '*.py'")
@@ -194,6 +195,7 @@ def test_should_agent_run_command_rejects_find_with_side_effects() -> None:
 
 def test_should_agent_run_command_rejects_sed_in_place_edit() -> None:
     assert not PolicyService.should_agent_run_command("sed -i 's/a/b/' x.py")
+    assert not PolicyService.should_agent_run_command("sed -n '1,2p' -i")
 
 
 def test_should_agent_run_command_rejects_rg_command_execution_flags() -> None:

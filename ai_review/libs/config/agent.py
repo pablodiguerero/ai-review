@@ -14,7 +14,7 @@ class AgentConfig(BaseModel):
             re.compile(r"^head(?:\s+.*)?$"),
             re.compile(r"^tail(?:\s+.*)?$"),
             re.compile(r"^wc(?:\s+.*)?$"),
-            re.compile(r"^sed\s+-n\s+'?\d+(?:,\d+)?p'?\s+\S+$"),
+            re.compile(r"""^sed\s+-n\s+(['"]?)\d+(?:,\d+)?p\1\s+(?!-)\S+$"""),
             re.compile(
                 r"^rg(?![\s\S]*(?:--pre\b|--pre-glob|--hostname-bin|--search-zip|\s-z(?:\s|$)))"
                 r"(?:\s+[\s\S]*)?$"

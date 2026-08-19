@@ -36,7 +36,7 @@ def test_agent_config_default_allow_commands_patterns_are_stable() -> None:
         r"^head(?:\s+.*)?$",
         r"^tail(?:\s+.*)?$",
         r"^wc(?:\s+.*)?$",
-        r"^sed\s+-n\s+'?\d+(?:,\d+)?p'?\s+\S+$",
+        r"""^sed\s+-n\s+(['"]?)\d+(?:,\d+)?p\1\s+(?!-)\S+$""",
         r"^rg(?![\s\S]*(?:--pre\b|--pre-glob|--hostname-bin|--search-zip|\s-z(?:\s|$)))(?:\s+[\s\S]*)?$",
         r"^grep(?:\s+.*)?$",
         r"^find(?![\s\S]*(?:-exec|-execdir|-ok|-okdir|-delete|-fprint|-fprintf|-fls))(?:\s+[\s\S]*)?$",
@@ -58,6 +58,8 @@ def test_agent_config_default_allow_commands_match_expected_commands() -> None:
     assert is_allowed("tail -n 20 file.py")
     assert is_allowed("wc -l file.py")
     assert is_allowed("sed -n '10,20p' file.py")
+    assert is_allowed('sed -n "10,20p" file.py')
+    assert is_allowed("sed -n 10,20p file.py")
     assert is_allowed("rg TODO ai_review")
     assert is_allowed("rg -n 'a|b' src")
     assert is_allowed("grep -R foo .")
@@ -74,6 +76,7 @@ def test_agent_config_default_allow_commands_match_expected_commands() -> None:
     assert not is_allowed("find\n. -exec rm {} +")
     assert not is_allowed("find \n. -delete")
     assert not is_allowed("sed -i 's/a/b/' file.py")
+    assert not is_allowed("sed -n '1,2p' -i")
     assert not is_allowed("rg --pre sh x .")
     assert not is_allowed("rg --pre-glob '*.gz' x .")
     assert not is_allowed("rg --hostname-bin foo x")
