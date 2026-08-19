@@ -32,7 +32,14 @@ class PromptService(PromptServiceProtocol):
             original_prompt: str,
             original_prompt_system: str,
     ) -> str:
-        mode = "Return FINAL only." if force_final else "You can either call a tool or return FINAL."
+        force_final_mode = (
+            "Return FINAL only. The tool budget is exhausted: do NOT request any TOOL_CALL and do NOT "
+            "deliberate about further verification. Write the final task output now from the evidence "
+            "already present in the agent history; if a claim could not be verified, state that "
+            "explicitly and mark it low-confidence instead of withholding the review. Keep any reasoning "
+            "brief and put the complete review into the FINAL `content` string."
+        )
+        mode = force_final_mode if force_final else "You can either call a tool or return FINAL."
         history = format_traces(traces)
         agent_prompt = cls.prepare_prompt(settings.prompt.load_agent(), PromptContextSchema())
 

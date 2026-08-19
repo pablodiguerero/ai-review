@@ -1,5 +1,6 @@
 import pytest
 
+from ai_review.config import settings
 from ai_review.services.agent.loop.schema import AgentAction, AgentStepSchema, AgentTraceSchema
 from ai_review.services.agent.loop.schema import AgentLoopResultSchema
 from ai_review.services.review.gateway.review_agent_llm_gateway import ReviewAgentLLMGateway
@@ -20,6 +21,9 @@ async def test_agent_gateway_returns_agent_result(
     fake_agent_loop_service.responses["run"] = AgentLoopResultSchema(
         final_text="AGENT_RESPONSE",
         stop_reason="final",
+        iterations=2,
+        executed_tool_calls=1,
+        blocked_tool_calls=0,
         traces=[
             AgentTraceSchema(
                 step=AgentStepSchema(action=AgentAction.FINAL, content="step-one"),
@@ -50,6 +54,10 @@ async def test_agent_gateway_returns_agent_result(
     assert any(call[0] == "save_llm" for call in fake_artifacts_service.calls)
     save_call = next(call for call in fake_artifacts_service.calls if call[0] == "save_llm")
     assert save_call[1]["cost_report"] is not None
+    assert save_call[1]["agent"].iterations == 2
+    assert save_call[1]["agent"].executed_tool_calls == 1
+    assert save_call[1]["agent"].blocked_tool_calls == 0
+    assert save_call[1]["agent"].stop_reason == "final"
     assert fake_fallback_review_llm_gateway.calls == []
 
 
@@ -59,8 +67,6 @@ async def test_agent_gateway_does_not_fall_back_when_verification_was_aborted(
         fake_agent_loop_service: FakeAgentLoopService,
         fake_fallback_review_llm_gateway: FakeFallbackReviewLLMGateway,
 ):
-    # The abort exists to stop an unverified review; a one-shot fallback would
-    # publish exactly that.
     fake_agent_loop_service.responses["abort"] = True
 
     result = await review_agent_llm_gateway.ask("PROMPT", "SYSTEM_PROMPT")
@@ -70,11 +76,29 @@ async def test_agent_gateway_does_not_fall_back_when_verification_was_aborted(
 
 
 @pytest.mark.asyncio
-async def test_agent_gateway_falls_back_to_default_gateway_on_error(
+async def test_agent_gateway_posts_nothing_on_error_when_fallback_disabled(
+        monkeypatch: pytest.MonkeyPatch,
         review_agent_llm_gateway: ReviewAgentLLMGateway,
         fake_agent_loop_service: FakeAgentLoopService,
         fake_fallback_review_llm_gateway: FakeFallbackReviewLLMGateway,
 ):
+    monkeypatch.setattr(settings.agent, "fallback_to_direct_chat", False)
+    fake_agent_loop_service.responses["raise"] = True
+
+    result = await review_agent_llm_gateway.ask("PROMPT", "SYSTEM_PROMPT")
+
+    assert result == ""
+    assert fake_fallback_review_llm_gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_gateway_falls_back_to_default_gateway_on_error_when_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        review_agent_llm_gateway: ReviewAgentLLMGateway,
+        fake_agent_loop_service: FakeAgentLoopService,
+        fake_fallback_review_llm_gateway: FakeFallbackReviewLLMGateway,
+):
+    monkeypatch.setattr(settings.agent, "fallback_to_direct_chat", True)
     fake_agent_loop_service.responses["raise"] = True
     fake_fallback_review_llm_gateway.responses["ask"] = "ONE_SHOT_RESPONSE"
 

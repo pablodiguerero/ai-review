@@ -4,6 +4,7 @@ from pydantic import BaseModel, HttpUrl, SecretStr, FilePath
 class HTTPClientConfig(BaseModel):
     verify: FilePath | bool | None = True
     timeout: float = 120
+    connect_timeout: float = 10
     api_url: HttpUrl
     proxy_url: HttpUrl | None = None
 

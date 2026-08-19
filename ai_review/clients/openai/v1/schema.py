@@ -1,12 +1,12 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OpenAIUsageSchema(BaseModel):
-    total_tokens: int
-    prompt_tokens: int
-    completion_tokens: int
+    total_tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class OpenAIMessageSchema(BaseModel):
@@ -16,6 +16,7 @@ class OpenAIMessageSchema(BaseModel):
 
 class OpenAIChoiceSchema(BaseModel):
     message: OpenAIMessageSchema
+    finish_reason: str | None = None
 
 
 class OpenAIStreamOptionsSchema(BaseModel):
@@ -23,6 +24,8 @@ class OpenAIStreamOptionsSchema(BaseModel):
 
 
 class OpenAIChatRequestSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     model: str
     stream: bool = False
     stream_options: OpenAIStreamOptionsSchema | None = None
@@ -34,9 +37,6 @@ class OpenAIChatRequestSchema(BaseModel):
 
 class OpenAIStreamDeltaSchema(BaseModel):
     content: str | None = None
-    # Never rendered - tracked only because a provider that streamed reasoning
-    # has already billed for it, which decides whether a retry is safe. Both
-    # spellings are in the wild.
     reasoning: str | None = None
     reasoning_content: str | None = None
 
@@ -51,9 +51,6 @@ class OpenAIStreamChoiceSchema(BaseModel):
     finish_reason: str | None = None
 
 
-# Deliberately looser than OpenAIUsageSchema: gateways attach partial or
-# differently named usage blocks to content chunks, and a strict model would
-# drop the chunk together with its text.
 class OpenAIStreamUsageSchema(BaseModel):
     total_tokens: int = 0
     prompt_tokens: int = 0
@@ -78,7 +75,7 @@ class OpenAIChatStreamChunkSchema(BaseModel):
 
 
 class OpenAIChatResponseSchema(BaseModel):
-    usage: OpenAIUsageSchema
+    usage: OpenAIUsageSchema = Field(default_factory=OpenAIUsageSchema)
     choices: list[OpenAIChoiceSchema]
 
     @property

@@ -2,7 +2,11 @@ import pytest
 from typer.testing import CliRunner
 
 from ai_review.cli.main import app
+from ai_review.config import settings
+from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.review.service import ReviewService
+from ai_review.tests.fixtures.services.review.runner.inline import FakeInlineReviewRunner
+from ai_review.tests.fixtures.services.review.runner.summary import FakeSummaryReviewRunner
 
 runner = CliRunner()
 
@@ -29,9 +33,6 @@ def dummy_review_service(monkeypatch: pytest.MonkeyPatch, review_service: Review
     ],
 )
 def test_cli_commands_invoke_review_service_successfully(args: list[str], expected_output: str):
-    """
-    Ensure CLI commands correctly call the ReviewService with fake dependencies.
-    """
     result = runner.invoke(app, args)
 
     assert result.exit_code == 0
@@ -40,9 +41,6 @@ def test_cli_commands_invoke_review_service_successfully(args: list[str], expect
 
 
 def test_show_config_outputs_json(monkeypatch: pytest.MonkeyPatch):
-    """
-    Validate that the 'show-config' command prints settings as JSON.
-    """
     monkeypatch.setattr(
         "ai_review.cli.main.settings.model_dump_json",
         lambda **_: '{"debug": true}'
@@ -52,3 +50,119 @@ def test_show_config_outputs_json(monkeypatch: pytest.MonkeyPatch):
     assert result.exit_code == 0
     assert "Loaded AI Review configuration" in result.output
     assert '{"debug": true}' in result.output
+
+
+def test_run_inline_exits_with_error_when_empty_and_fail_on_empty_result_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_inline_review_runner: FakeInlineReviewRunner,
+):
+    monkeypatch.setattr(settings.review, "fail_on_empty_result", True)
+    fake_inline_review_runner.outcome = ReviewOutcome.EMPTY
+
+    result = runner.invoke(app, ["run-inline"])
+
+    assert result.exit_code == 1
+    assert "produced no usable result" in result.output
+    assert "AI review completed successfully!" not in result.output
+
+
+def test_run_inline_exits_zero_when_empty_and_fail_on_empty_result_disabled(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_inline_review_runner: FakeInlineReviewRunner,
+):
+    monkeypatch.setattr(settings.review, "fail_on_empty_result", False)
+    fake_inline_review_runner.outcome = ReviewOutcome.EMPTY
+
+    result = runner.invoke(app, ["run-inline"])
+
+    assert result.exit_code == 0
+    assert "AI review completed successfully!" in result.output
+
+
+def test_run_summary_exits_with_error_when_empty_and_fail_on_empty_result_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_summary_review_runner: FakeSummaryReviewRunner,
+):
+    monkeypatch.setattr(settings.review, "fail_on_empty_result", True)
+    fake_summary_review_runner.outcome = ReviewOutcome.EMPTY
+
+    result = runner.invoke(app, ["run-summary"])
+
+    assert result.exit_code == 1
+    assert "produced no usable result" in result.output
+    assert "AI review completed successfully!" not in result.output
+
+
+def test_run_summary_exits_zero_when_posted_even_with_fail_on_empty_result_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_summary_review_runner: FakeSummaryReviewRunner,
+):
+    monkeypatch.setattr(settings.review, "fail_on_empty_result", True)
+    fake_summary_review_runner.outcome = ReviewOutcome.POSTED
+
+    result = runner.invoke(app, ["run-summary"])
+
+    assert result.exit_code == 0
+    assert "AI review completed successfully!" in result.output
+
+
+def test_run_exits_with_error_when_inline_empty_and_fail_on_empty_result_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_inline_review_runner: FakeInlineReviewRunner,
+        fake_summary_review_runner: FakeSummaryReviewRunner,
+):
+    monkeypatch.setattr(settings.review, "fail_on_empty_result", True)
+    fake_inline_review_runner.outcome = ReviewOutcome.EMPTY
+    fake_summary_review_runner.outcome = ReviewOutcome.POSTED
+
+    result = runner.invoke(app, ["run"])
+
+    assert result.exit_code == 1
+    assert "produced no usable result" in result.output
+    assert "AI review completed successfully!" not in result.output
+
+
+def test_run_exits_with_error_when_summary_empty_and_fail_on_empty_result_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_inline_review_runner: FakeInlineReviewRunner,
+        fake_summary_review_runner: FakeSummaryReviewRunner,
+):
+    monkeypatch.setattr(settings.review, "fail_on_empty_result", True)
+    fake_inline_review_runner.outcome = ReviewOutcome.POSTED
+    fake_summary_review_runner.outcome = ReviewOutcome.EMPTY
+
+    result = runner.invoke(app, ["run"])
+
+    assert result.exit_code == 1
+    assert "produced no usable result" in result.output
+    assert "AI review completed successfully!" not in result.output
+
+
+def test_run_exits_zero_when_both_posted_and_fail_on_empty_result_enabled(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_inline_review_runner: FakeInlineReviewRunner,
+        fake_summary_review_runner: FakeSummaryReviewRunner,
+):
+    monkeypatch.setattr(settings.review, "fail_on_empty_result", True)
+    fake_inline_review_runner.outcome = ReviewOutcome.POSTED
+    fake_summary_review_runner.outcome = ReviewOutcome.POSTED
+
+    result = runner.invoke(app, ["run"])
+
+    assert result.exit_code == 0
+    assert "AI review completed successfully!" in result.output
+
+
+def test_run_exits_zero_when_empty_and_fail_on_empty_result_disabled(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_inline_review_runner: FakeInlineReviewRunner,
+        fake_summary_review_runner: FakeSummaryReviewRunner,
+):
+    monkeypatch.setattr(settings.review, "fail_on_empty_result", False)
+    fake_inline_review_runner.outcome = ReviewOutcome.EMPTY
+    fake_summary_review_runner.outcome = ReviewOutcome.EMPTY
+
+    result = runner.invoke(app, ["run"])
+
+    assert result.exit_code == 0
+    assert "AI review completed successfully!" in result.output

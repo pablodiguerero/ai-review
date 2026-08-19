@@ -14,6 +14,8 @@ On each turn you MUST return exactly one JSON object — either a tool request o
 - Gather missing context via TOOL_CALL first, then finalize. Never invent command results.
 - Keep commands precise, targeted, and non-destructive.
 - Do not repeat commands already executed.
+- Exactly one plain command per TOOL_CALL — no pipes, no `&&`, no redirects; read big files in ranges with
+  `sed -n 'A,Bp' FILE` or `head`/`tail`.
 - One JSON object per response — no markdown fences, no extra keys, no prose outside the JSON.
 
 ## Decision Guidance

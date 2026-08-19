@@ -53,7 +53,8 @@ improve code quality, enforce consistency, and speed up the review process.
 ✨ Key features:
 
 - **Multiple LLM providers** — choose between **OpenAI**, **Claude**, **Gemini**, **Ollama**, **Bedrock**,
-  **OpenRouter**, or **Azure OpenAI** and switch anytime.
+  **OpenRouter**, or **Azure OpenAI** and switch anytime. For OpenAI-compatible gateways, `LLM__META__API`
+  (`AUTO`/`CHAT`/`RESPONSES`) pins a model to `/chat/completions` or `/responses` when auto-detection isn't enough.
 - **VCS integration** — works out of the box with **GitLab**, **GitHub**, **Bitbucket Cloud**, **Bitbucket Server**,
   **Azure DevOps**, and **Gitea**.
 - **Customizable prompts** — adapt inline, context, and summary reviews to match your team’s coding guidelines.
@@ -188,6 +189,10 @@ Use these snippets to run AI Review automatically on Pull/Merge Requests.
 Each integration uses environment variables for LLM and VCS configuration.
 
 > For full configuration details (timeouts, artifacts, logging, prompt overrides), see [./docs/configs](./docs/configs).
+
+> Running against gateways like OpenCode Go, or reviewing untrusted checkouts in CI? See
+> [./docs/ci/gitlab-opencode-go.md](./docs/ci/gitlab-opencode-go.md) for the `LLM__META__API` routing setup and the
+> `AI_REVIEW_CONFIG_FILE_*` security pins.
 
 ### 🚀 GitHub Actions
 

@@ -21,7 +21,7 @@ from ai_review.clients.openai.v2.schema import (
 from ai_review.clients.openai.v2.types import OpenAIV2HTTPClientProtocol
 from ai_review.config import settings
 from ai_review.libs.config.llm.base import OpenAILLMConfig
-from ai_review.libs.config.llm.openai import OpenAIMetaConfig, OpenAIHTTPClientConfig
+from ai_review.libs.config.llm.openai import OpenAIAPI, OpenAIMetaConfig, OpenAIHTTPClientConfig
 from ai_review.libs.constants.llm_provider import LLMProvider
 from ai_review.services.llm.openai.client import OpenAILLMClient
 
@@ -116,6 +116,7 @@ def openai_v1_http_client_config(monkeypatch: pytest.MonkeyPatch):
         provider=LLMProvider.OPENAI,
         http_client=OpenAIHTTPClientConfig(
             timeout=10,
+            connect_timeout=3,
             api_url=HttpUrl("https://api.openai.com/v1"),
             api_token=SecretStr("fake-token"),
         ),
@@ -134,7 +135,46 @@ def openai_v2_http_client_config(monkeypatch: pytest.MonkeyPatch):
         provider=LLMProvider.OPENAI,
         http_client=OpenAIHTTPClientConfig(
             timeout=10,
+            connect_timeout=3,
             api_url=HttpUrl("https://api.openai.com/v1"),
+            api_token=SecretStr("fake-token"),
+        ),
+    )
+    monkeypatch.setattr(settings, "llm", fake_config)
+
+
+@pytest.fixture
+def openai_v1_http_client_config_forced_chat(monkeypatch: pytest.MonkeyPatch):
+    fake_config = OpenAILLMConfig(
+        meta=OpenAIMetaConfig(
+            model="gpt-5",
+            api=OpenAIAPI.CHAT,
+            max_tokens=1200,
+            temperature=0.3
+        ),
+        provider=LLMProvider.OPENAI,
+        http_client=OpenAIHTTPClientConfig(
+            timeout=10,
+            api_url=HttpUrl("https://opencode.ai/zen/go/v1"),
+            api_token=SecretStr("fake-token"),
+        ),
+    )
+    monkeypatch.setattr(settings, "llm", fake_config)
+
+
+@pytest.fixture
+def openai_v2_http_client_config_forced_responses(monkeypatch: pytest.MonkeyPatch):
+    fake_config = OpenAILLMConfig(
+        meta=OpenAIMetaConfig(
+            model="deepseek-v4-flash",
+            api=OpenAIAPI.RESPONSES,
+            max_tokens=2000,
+            temperature=0.2
+        ),
+        provider=LLMProvider.OPENAI,
+        http_client=OpenAIHTTPClientConfig(
+            timeout=10,
+            api_url=HttpUrl("https://opencode.ai/zen/go/v1"),
             api_token=SecretStr("fake-token"),
         ),
     )

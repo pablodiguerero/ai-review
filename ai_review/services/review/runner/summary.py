@@ -9,6 +9,7 @@ from ai_review.services.prompt.adapter import build_prompt_context_from_review_i
 from ai_review.services.prompt.types import PromptServiceProtocol
 from ai_review.services.review.gateway.types import ReviewLLMGatewayProtocol, ReviewCommentGatewayProtocol
 from ai_review.services.review.internal.summary.types import SummaryCommentServiceProtocol
+from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.review.runner.types import ReviewRunnerProtocol
 from ai_review.services.vcs.types import VCSClientProtocol
 
@@ -39,8 +40,6 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
         self.review_comment_gateway = review_comment_gateway
 
     async def _build_prior_feedback(self) -> str | None:
-        """Collect prior AI summary reviews and the human responses to them, so the
-        model can learn from feedback instead of repeating refuted findings."""
         tag = settings.review.summary_tag
         threads = await self.vcs.get_general_threads()
         blocks: list[str] = []
@@ -68,7 +67,7 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
             return None
         return "\n\n---\n\n".join(blocks)
 
-    async def run(self) -> None:
+    async def run(self) -> ReviewOutcome:
         await hook.emit_summary_review_start()
 
         comments = await self.review_comment_gateway.get_summary_comments()
@@ -76,7 +75,7 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
         if comments:
             if not settings.review.summary_feedback_loop:
                 logger.info(f"Detected {len(comments)} existing AI summary comments, skipping summary review")
-                return
+                return ReviewOutcome.SKIPPED
             prior_feedback = await self._build_prior_feedback()
             logger.info(
                 f"Feedback loop enabled: {len(comments)} prior summary comment(s); re-reviewing with "
@@ -87,7 +86,7 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
         changed_files = self.policy.apply_for_files(review_info.changed_files)
         if not changed_files:
             logger.info("No files to review for summary")
-            return
+            return ReviewOutcome.SKIPPED
 
         logger.info(f"Starting summary review: {len(changed_files)} files changed")
 
@@ -105,8 +104,9 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
         summary = self.summary_comment.parse_model_output(prompt_result)
         if not summary.text.strip():
             logger.warning("Summary LLM output was empty, skipping comment")
-            return
+            return ReviewOutcome.EMPTY
 
         logger.info(f"Posting summary review comment ({len(summary.text)} chars)")
         await self.review_comment_gateway.process_summary_comment(summary)
         await hook.emit_summary_review_complete(self.cost.aggregate())
+        return ReviewOutcome.POSTED

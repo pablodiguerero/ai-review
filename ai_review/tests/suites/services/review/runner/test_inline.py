@@ -2,6 +2,7 @@ import pytest
 
 from ai_review.config import settings
 from ai_review.services.review.runner.inline import InlineReviewRunner
+from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.vcs.types import ReviewInfoSchema, ReviewCommentSchema
 from ai_review.tests.fixtures.services.cost import FakeCostService
 from ai_review.tests.fixtures.services.diff import FakeDiffService
@@ -26,11 +27,12 @@ async def test_run_happy_path(
         fake_review_comment_gateway: FakeReviewCommentGateway,
         fake_review_direct_llm_gateway: FakeReviewDirectLLMGateway,
 ):
-    """Should process all changed files, call LLM and post inline comments."""
     fake_git_service.responses["get_diff_for_file"] = "FAKE_DIFF"
     fake_review_comment_gateway.responses["get_inline_comments"] = []
 
-    await inline_review_runner.run()
+    outcome = await inline_review_runner.run()
+
+    assert outcome == ReviewOutcome.POSTED
 
     vcs_calls = [call[0] for call in fake_vcs_client.calls]
     assert "get_review_info" in vcs_calls
@@ -54,16 +56,120 @@ async def test_run_skips_when_existing_comments(
         fake_review_comment_gateway: FakeReviewCommentGateway,
         fake_review_direct_llm_gateway: FakeReviewDirectLLMGateway,
 ):
-    """Should skip review if there are already existing inline comments."""
     fake_review_comment_gateway.responses["get_inline_comments"] = [
         ReviewCommentSchema(id="1", body=f"{settings.review.inline_tag} existing")
     ]
 
-    await inline_review_runner.run()
+    outcome = await inline_review_runner.run()
 
+    assert outcome == ReviewOutcome.SKIPPED
     vcs_calls = [call[0] for call in fake_vcs_client.calls]
     assert vcs_calls == []
     assert not any(call[0] == "ask" for call in fake_review_direct_llm_gateway.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_skips_when_no_changed_files(
+        inline_review_runner: InlineReviewRunner,
+        fake_policy_service: FakePolicyService,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    fake_policy_service.responses["apply_for_files"] = []
+    fake_review_comment_gateway.responses["get_inline_comments"] = []
+
+    outcome = await inline_review_runner.run()
+
+    assert outcome == ReviewOutcome.SKIPPED
+
+
+@pytest.mark.asyncio
+async def test_run_returns_posted_when_any_file_posts(
+        monkeypatch: pytest.MonkeyPatch,
+        inline_review_runner: InlineReviewRunner,
+        fake_vcs_client: FakeVCSClient,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    fake_review_comment_gateway.responses["get_inline_comments"] = []
+    fake_vcs_client.responses["get_review_info"] = ReviewInfoSchema(
+        changed_files=["a.py", "b.py"], base_sha="A", head_sha="B",
+    )
+
+    async def process_file(file: str, review_info: ReviewInfoSchema) -> ReviewOutcome:
+        return ReviewOutcome.POSTED if file == "a.py" else ReviewOutcome.EMPTY
+
+    monkeypatch.setattr(inline_review_runner, "process_file", process_file)
+
+    outcome = await inline_review_runner.run()
+
+    assert outcome == ReviewOutcome.POSTED
+
+
+@pytest.mark.asyncio
+async def test_run_returns_empty_when_a_file_was_reviewed_but_nothing_posted(
+        monkeypatch: pytest.MonkeyPatch,
+        inline_review_runner: InlineReviewRunner,
+        fake_vcs_client: FakeVCSClient,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    fake_review_comment_gateway.responses["get_inline_comments"] = []
+    fake_vcs_client.responses["get_review_info"] = ReviewInfoSchema(
+        changed_files=["a.py", "b.py"], base_sha="A", head_sha="B",
+    )
+
+    async def process_file(file: str, review_info: ReviewInfoSchema) -> ReviewOutcome:
+        return ReviewOutcome.SKIPPED if file == "a.py" else ReviewOutcome.EMPTY
+
+    monkeypatch.setattr(inline_review_runner, "process_file", process_file)
+
+    outcome = await inline_review_runner.run()
+
+    assert outcome == ReviewOutcome.EMPTY
+
+
+@pytest.mark.asyncio
+async def test_run_returns_empty_when_every_file_raises(
+        monkeypatch: pytest.MonkeyPatch,
+        inline_review_runner: InlineReviewRunner,
+        fake_vcs_client: FakeVCSClient,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    fake_review_comment_gateway.responses["get_inline_comments"] = []
+    fake_vcs_client.responses["get_review_info"] = ReviewInfoSchema(
+        changed_files=["a.py", "b.py"], base_sha="A", head_sha="B",
+    )
+
+    async def process_file(file: str, review_info: ReviewInfoSchema) -> ReviewOutcome:
+        raise RuntimeError(f"boom: {file}")
+
+    monkeypatch.setattr(inline_review_runner, "process_file", process_file)
+
+    outcome = await inline_review_runner.run()
+
+    assert outcome == ReviewOutcome.EMPTY
+
+
+@pytest.mark.asyncio
+async def test_run_returns_posted_when_one_file_raises_and_another_posts(
+        monkeypatch: pytest.MonkeyPatch,
+        inline_review_runner: InlineReviewRunner,
+        fake_vcs_client: FakeVCSClient,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    fake_review_comment_gateway.responses["get_inline_comments"] = []
+    fake_vcs_client.responses["get_review_info"] = ReviewInfoSchema(
+        changed_files=["a.py", "b.py"], base_sha="A", head_sha="B",
+    )
+
+    async def process_file(file: str, review_info: ReviewInfoSchema) -> ReviewOutcome:
+        if file == "a.py":
+            raise RuntimeError("boom")
+        return ReviewOutcome.POSTED
+
+    monkeypatch.setattr(inline_review_runner, "process_file", process_file)
+
+    outcome = await inline_review_runner.run()
+
+    assert outcome == ReviewOutcome.POSTED
 
 
 @pytest.mark.asyncio
@@ -73,12 +179,12 @@ async def test_process_file_skips_when_no_diff(
         fake_review_comment_gateway: FakeReviewCommentGateway,
         fake_review_direct_llm_gateway: FakeReviewDirectLLMGateway,
 ):
-    """Should skip processing file if no diff found."""
     fake_git_service.responses["get_diff_for_file"] = ""
 
     review_info = ReviewInfoSchema(base_sha="A", head_sha="B")
-    await inline_review_runner.process_file("file.py", review_info)
+    outcome = await inline_review_runner.process_file("file.py", review_info)
 
+    assert outcome == ReviewOutcome.SKIPPED
     assert not any(call[0] == "ask" for call in fake_review_direct_llm_gateway.calls)
     assert not any(call[0] == "process_inline_comments" for call in fake_review_comment_gateway.calls)
 
@@ -92,13 +198,13 @@ async def test_process_file_skips_when_no_comments_after_llm(
         fake_inline_comment_service: FakeInlineCommentService,
         fake_review_direct_llm_gateway: FakeReviewDirectLLMGateway,
 ):
-    """Should not post comments if model output produces no inline comments."""
     fake_git_service.responses["get_diff_for_file"] = "SOME_DIFF"
     fake_inline_comment_service.comments = []
 
     review_info = ReviewInfoSchema(base_sha="A", head_sha="B")
-    await inline_review_runner.process_file("file.py", review_info)
+    outcome = await inline_review_runner.process_file("file.py", review_info)
 
+    assert outcome == ReviewOutcome.EMPTY
     assert any(call[0] == "ask" for call in fake_review_direct_llm_gateway.calls)
     assert any(call[0] == "apply_for_inline_comments" for call in fake_policy_service.calls)
     assert not any(call[0] == "process_inline_comments" for call in fake_review_comment_gateway.calls)

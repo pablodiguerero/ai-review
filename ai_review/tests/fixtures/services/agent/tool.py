@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from ai_review.services.agent.tool.schema import AgentToolResultSchema
 from ai_review.services.agent.tool.service import AgentToolService
 from ai_review.services.agent.tool.types import AgentToolServiceProtocol
 from ai_review.tests.fixtures.services.policy import FakePolicyService
@@ -13,12 +14,15 @@ class FakeAgentToolService(AgentToolServiceProtocol):
         self.calls: list[tuple[str, dict]] = []
         self.responses = responses or {}
 
-    async def execute(self, command: str) -> str:
+    async def execute(self, command: str) -> AgentToolResultSchema:
         self.calls.append(("execute", {"command": command}))
         if self.responses.get("raise"):
             raise RuntimeError("tool failed")
 
-        return self.responses.get("execute", "AGENT_TOOL_RESULT")
+        result = self.responses.get("execute", "AGENT_TOOL_RESULT")
+        if isinstance(result, AgentToolResultSchema):
+            return result
+        return AgentToolResultSchema(command=command, output=result, executed=True)
 
 
 @pytest.fixture

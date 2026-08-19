@@ -1,10 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OpenAIResponseUsageSchema(BaseModel):
-    total_tokens: int
-    input_tokens: int
-    output_tokens: int
+    total_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class OpenAIInputMessageSchema(BaseModel):
@@ -24,17 +24,22 @@ class OpenAIResponseOutputSchema(BaseModel):
 
 
 class OpenAIResponsesRequestSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     model: str
     input: list[OpenAIInputMessageSchema]
     stream: bool = False
     temperature: float | None = None
     instructions: str | None = None
     max_output_tokens: int | None = None
+    text: dict | None = None
 
 
 class OpenAIResponsesResponseSchema(BaseModel):
-    usage: OpenAIResponseUsageSchema
+    usage: OpenAIResponseUsageSchema = Field(default_factory=OpenAIResponseUsageSchema)
     output: list[OpenAIResponseOutputSchema]
+    status: str | None = None
+    incomplete_details: dict | None = None
 
     @property
     def first_text(self) -> str:

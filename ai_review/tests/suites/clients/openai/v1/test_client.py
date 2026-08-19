@@ -22,6 +22,25 @@ def test_get_openai_v1_http_client_builds_ok():
     assert isinstance(openai_http_client, OpenAIV1HTTPClient)
     assert isinstance(openai_http_client.client, AsyncClient)
 
+    timeout = openai_http_client.client.timeout
+    assert timeout.connect == 3
+    assert timeout.read == 10
+    assert openai_http_client.client._transport.retry_transport_errors is True
+
+
+def test_chat_request_schema_allows_and_dumps_extra_fields():
+    request = OpenAIChatRequestSchema(
+        model="gpt-4o-mini",
+        messages=[OpenAIMessageSchema(role="user", content="hi")],
+        thinking={"type": "disabled"},
+    )
+
+    payload = request.model_dump(exclude_none=True)
+
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["model"] == "gpt-4o-mini"
+    assert len(payload["messages"]) == 1
+
 
 SSE_BODY = (
     b'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}],"usage":null}\n\n'
@@ -34,8 +53,6 @@ SSE_BODY = (
 
 
 class FailingStream(AsyncByteStream):
-    """Yields a prefix, then dies the way a dropped connection does."""
-
     def __init__(self, prefix: bytes):
         self.prefix = prefix
 
@@ -87,6 +104,22 @@ async def test_chat_stream_sends_stream_flag():
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_sends_extra_body_fields_over_the_wire():
+    captured: list[dict] = []
+
+    def handler(request):
+        captured.append(json.loads(request.content))
+        return Response(200, content=SSE_BODY)
+
+    client = build_stream_client(handler)
+
+    await client.chat(build_chat_request(stream=True, thinking={"type": "disabled"}))
+
+    assert captured[0]["thinking"] == {"type": "disabled"}
+    assert captured[0]["model"] == "gpt-4o-mini"
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_ignores_content_after_done():
     body = (
         b'data: {"choices":[{"delta":{"content":"kept"}}]}\n\n'
@@ -133,8 +166,6 @@ async def test_chat_stream_keeps_a_usage_block_without_a_total():
 
 @pytest.mark.asyncio
 async def test_chat_stream_raises_when_a_running_usage_total_precedes_a_drop():
-    # Usage riding along a CONTENT chunk is a running total, not an ending:
-    # trusting it would return half an answer as the finished review.
     def handler(request):
         return Response(
             200,
@@ -152,7 +183,6 @@ async def test_chat_stream_raises_when_a_running_usage_total_precedes_a_drop():
 
 @pytest.mark.asyncio
 async def test_chat_stream_accepts_a_usage_frame_as_the_only_completion_signal():
-    # grok on the zen gateway: no [DONE], finish_reason always null, usage last.
     body = (
         b'data: {"choices":[{"index":0,"delta":{"content":"whole"},"finish_reason":null}]}\n\n'
         b'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}\n\n'
@@ -186,7 +216,6 @@ async def test_chat_stream_raises_on_error_frame():
 
 @pytest.mark.asyncio
 async def test_chat_stream_returns_empty_text_when_no_content_arrived():
-    # The agent loop retries empty answers itself, so this must not raise.
     body = b'data: {"choices":[]}\n\ndata: [DONE]\n\n'
     client = build_stream_client(lambda request: Response(200, content=body))
 
@@ -234,8 +263,6 @@ async def test_chat_stream_keeps_the_first_meaningful_usage_block():
 
 @pytest.mark.asyncio
 async def test_chat_stream_rejects_an_empty_finish_reason_as_completion():
-    # Several gateways stamp "finish_reason": "" on every content chunk; reading
-    # that as an ending would disarm the truncation guard for the whole stream.
     body = b'data: {"choices":[{"delta":{"content":"half"},"finish_reason":""}]}\n\n'
     client = build_stream_client(lambda request: Response(200, content=body))
 
@@ -275,7 +302,6 @@ async def test_chat_stream_gives_up_after_repeated_connect_errors():
 
 @pytest.mark.asyncio
 async def test_chat_stream_retries_a_drop_after_a_prompt_only_usage_frame():
-    # Nothing was generated yet, so the retry costs nothing extra.
     attempts: list[int] = []
 
     def handler(request):
@@ -313,7 +339,6 @@ async def test_chat_stream_raises_when_a_dropped_chunk_carried_content():
 
 @pytest.mark.asyncio
 async def test_chat_stream_does_not_retry_a_drop_after_reasoning():
-    # Reasoning tokens are billed like output, so a retry here pays twice.
     attempts: list[int] = []
 
     def handler(request):
@@ -333,8 +358,6 @@ async def test_chat_stream_does_not_retry_a_drop_after_reasoning():
 
 @pytest.mark.asyncio
 async def test_chat_stream_survives_an_error_after_the_usage_frame():
-    # The gateway's last frame arrived, so the answer is whole - an error while
-    # closing the socket must not throw it away.
     def handler(request):
         return Response(
             200,
@@ -435,3 +458,56 @@ async def test_chat_without_stream_uses_plain_response():
 
     assert response.first_text == "plain"
     assert response.usage.total_tokens == 10
+
+
+@pytest.mark.asyncio
+async def test_chat_without_stream_raises_when_truncated_by_max_tokens():
+    body = {
+        "usage": {"total_tokens": 10, "prompt_tokens": 4, "completion_tokens": 6},
+        "choices": [{"message": {"role": "assistant", "content": "half"}, "finish_reason": "length"}],
+    }
+    client = build_stream_client(lambda request: Response(200, json=body))
+
+    with pytest.raises(OpenAIV1HTTPClientError, match="max_tokens") as error:
+        await client.chat(build_chat_request())
+
+    assert error.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_chat_without_stream_does_not_raise_for_a_normal_finish_reason():
+    body = {
+        "usage": {"total_tokens": 10, "prompt_tokens": 4, "completion_tokens": 6},
+        "choices": [{"message": {"role": "assistant", "content": "plain"}, "finish_reason": "stop"}],
+    }
+    client = build_stream_client(lambda request: Response(200, json=body))
+
+    response = await client.chat(build_chat_request())
+
+    assert response.first_text == "plain"
+
+
+@pytest.mark.asyncio
+async def test_chat_without_stream_does_not_raise_when_choices_are_empty():
+    body = {
+        "usage": {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0},
+        "choices": [],
+    }
+    client = build_stream_client(lambda request: Response(200, json=body))
+
+    response = await client.chat(build_chat_request())
+
+    assert response.first_text == ""
+
+
+@pytest.mark.asyncio
+async def test_chat_without_stream_defaults_usage_to_zero_when_omitted():
+    body = {"choices": [{"message": {"role": "assistant", "content": "plain"}}]}
+    client = build_stream_client(lambda request: Response(200, json=body))
+
+    response = await client.chat(build_chat_request())
+
+    assert response.first_text == "plain"
+    assert response.usage.total_tokens == 0
+    assert response.usage.prompt_tokens == 0
+    assert response.usage.completion_tokens == 0

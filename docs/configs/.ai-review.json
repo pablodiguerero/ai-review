@@ -43,13 +43,18 @@
     "allow_commands": [
       "^ls(?:\\s+.*)?$",
       "^cat(?:\\s+.*)?$",
+      "^head(?:\\s+.*)?$",
+      "^tail(?:\\s+.*)?$",
+      "^wc(?:\\s+.*)?$",
+      "^sed\\s+-n\\s+'?\\d+(?:,\\d+)?p'?\\s+\\S+$",
       "^rg(?:\\s+.*)?$",
       "^grep(?:\\s+.*)?$",
+      "^find(?![\\s\\S]*(?:-exec|-execdir|-ok|-okdir|-delete|-fprint|-fprintf|-fls))(?:\\s+[\\s\\S]*)?$",
       "^git\\s+(?:status|show|diff|log|rev-parse|ls-files)(?:\\s+.*)?$"
     ],
     "command_timeout": 10,
     "max_total_context_chars": 40000,
-    "max_command_output_chars": 40000
+    "max_command_output_chars": 8000
   },
   "prompt": {
     "context": {

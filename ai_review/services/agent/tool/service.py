@@ -5,10 +5,24 @@ from pathlib import Path
 from ai_review.config import settings
 from ai_review.libs.logger import get_logger
 from ai_review.libs.text import truncate_text
+from ai_review.services.agent.tool.schema import AgentToolResultSchema
 from ai_review.services.agent.tool.types import AgentToolServiceProtocol
 from ai_review.services.policy.types import PolicyServiceProtocol
 
 logger = get_logger("AGENT_TOOL_SERVICE")
+
+SHELL_OPERATORS_BLOCKED_HINT = (
+    "Agent command blocked by policy: shell operators are not supported, run one plain command "
+    "per TOOL_CALL (no pipes, no &&, no redirects): {command}"
+)
+TRUNCATION_HINT = (
+    "\nOutput truncated: read the file in ranges with sed -n 'A,Bp' FILE or head/tail, "
+    "or narrow the search with rg."
+)
+
+
+def _allowed_commands_hint() -> str:
+    return ", ".join(pattern.pattern for pattern in settings.agent.allow_commands)
 
 
 class AgentToolService(AgentToolServiceProtocol):
@@ -23,26 +37,36 @@ class AgentToolService(AgentToolServiceProtocol):
         self.command_timeout = settings.agent.command_timeout
         self.max_command_output_chars = settings.agent.max_command_output_chars
 
-    async def execute(self, command: str) -> str:
+    async def execute(self, command: str) -> AgentToolResultSchema:
         command = (command or "").strip()
         command_preview = f"{self.repo_root}#{command}"
 
         if not command:
             logger.warning("Agent command rejected: empty command")
-            return "Agent command rejected: empty command"
+            return AgentToolResultSchema(
+                command=command,
+                output="Agent command rejected: empty command",
+                executed=False,
+            )
 
         if not self.policy.should_agent_run_command(command):
-            logger.warning(f"Agent command blocked by policy: {command}")
-            return f"Agent command blocked by policy: {command}"
+            if self.policy.command_has_shell_operators(command):
+                message = SHELL_OPERATORS_BLOCKED_HINT.format(command=command)
+            else:
+                message = f"Agent command blocked by policy: {command}. Allowed: {_allowed_commands_hint()}"
+            logger.warning(message)
+            return AgentToolResultSchema(command=command, output=message, executed=False)
 
         try:
             argv = shlex.split(command)
         except ValueError as error:
-            logger.warning(f"Agent command parse error: {command} | {error}")
-            return f"Agent command parse error: {command} | {error}"
+            message = f"Agent command parse error: {command} | {error}"
+            logger.warning(message)
+            return AgentToolResultSchema(command=command, output=message, executed=False)
         if not argv:
-            logger.warning(f"Agent command rejected after parsing: {command}")
-            return f"Agent command rejected after parsing: {command}"
+            message = f"Agent command rejected after parsing: {command}"
+            logger.warning(message)
+            return AgentToolResultSchema(command=command, output=message, executed=False)
 
         logger.debug(f"Running agent command: {command_preview}, timeout={self.command_timeout}s")
         try:
@@ -56,11 +80,13 @@ class AgentToolService(AgentToolServiceProtocol):
                 capture_output=True,
             )
         except subprocess.TimeoutExpired:
-            logger.warning(f"Agent command timeout: {command_preview}, timeout={self.command_timeout}s")
-            return f"Agent command timeout: {command_preview}, timeout={self.command_timeout}s"
+            message = f"Agent command timeout: {command_preview}, timeout={self.command_timeout}s"
+            logger.warning(message)
+            return AgentToolResultSchema(command=command, output=message, executed=False)
         except Exception as error:
-            logger.exception(f"Agent command failed: {command_preview}:{error}")
-            return f"Agent command failed: {command_preview}:{error}"
+            message = f"Agent command failed: {command_preview}:{error}"
+            logger.exception(message)
+            return AgentToolResultSchema(command=command, output=message, executed=False)
 
         stdout = result.stdout or ""
         stderr = result.stderr or ""
@@ -81,5 +107,9 @@ class AgentToolService(AgentToolServiceProtocol):
                 "Agent command output truncated: "
                 f"{command}, payload_chars={len(output)}, limit={self.max_command_output_chars}"
             )
+            content_budget = max(self.max_command_output_chars - len(TRUNCATION_HINT), 0)
+            output = (output[:content_budget] + TRUNCATION_HINT)[:self.max_command_output_chars]
+        else:
+            output = truncate_text(text=output, limit=self.max_command_output_chars)
 
-        return truncate_text(text=output, limit=self.max_command_output_chars)
+        return AgentToolResultSchema(command=command, output=output, executed=True)

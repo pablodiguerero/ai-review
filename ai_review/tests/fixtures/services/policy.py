@@ -30,6 +30,10 @@ class FakePolicyService(PolicyServiceProtocol):
         self.calls.append(("should_agent_run_command", {"command": command}))
         return self.responses.get("should_agent_run_command", True)
 
+    def command_has_shell_operators(self, command: str) -> bool:
+        self.calls.append(("command_has_shell_operators", {"command": command}))
+        return self.responses.get("command_has_shell_operators", False)
+
 
 @pytest.fixture
 def fake_policy_service() -> FakePolicyService:

@@ -5,6 +5,7 @@
 **/__pycache__
 **/*.egg-info
 artifacts
+e2e/workspace/
 .ai-review.yaml
 .ai-review.json
 .env

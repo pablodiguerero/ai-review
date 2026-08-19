@@ -3,11 +3,13 @@ FROM python:${PYTHON_VERSION}
 
 WORKDIR /app
 
+ENV PYTHONUNBUFFERED=1
+
 RUN apt-get update && \
     apt-get install -y bash ca-certificates curl git libexpat1 openssh-client ripgrep && \
     rm -rf /var/lib/apt/lists/*
-RUN git config --global --add safe.directory '*'
-RUN git config --global core.quotepath false
+RUN git config --system --add safe.directory '*'
+RUN git config --system core.quotepath false
 
 COPY . /src
 RUN pip install --no-cache-dir /src

@@ -1,10 +1,15 @@
 import fnmatch
+import re
+import shlex
 
 from ai_review.config import settings
 from ai_review.libs.logger import get_logger
 from ai_review.services.policy.types import PolicyServiceProtocol
 
 logger = get_logger("REVIEW_SERVICE")
+
+SHELL_OPERATOR_CHARS = frozenset("();<>|&")
+SENSITIVE_PATH_RE = re.compile(r"(?:^|[\s'\"])(?:/proc/|/dev/)")
 
 
 class PolicyService(PolicyServiceProtocol):
@@ -30,12 +35,36 @@ class PolicyService(PolicyServiceProtocol):
         return False
 
     @classmethod
+    def command_has_shell_operators(cls, command: str) -> bool:
+        tokenizer = shlex.shlex(command, posix=False, punctuation_chars=True)
+        tokenizer.whitespace_split = True
+
+        try:
+            tokens = list(tokenizer)
+        except ValueError:
+            return False
+
+        return any(token and set(token) <= SHELL_OPERATOR_CHARS for token in tokens)
+
+    @classmethod
     def should_agent_run_command(cls, command: str) -> bool:
         agent = settings.agent
         command = (command or "").strip()
 
         if not command:
             logger.debug("Agent command policy: blocked empty command")
+            return False
+
+        if "\n" in command or "\r" in command:
+            logger.debug(f"Agent command policy: block '{command}' (newline characters)")
+            return False
+
+        if SENSITIVE_PATH_RE.search(command):
+            logger.debug(f"Agent command policy: block '{command}' (sensitive /proc or /dev path)")
+            return False
+
+        if cls.command_has_shell_operators(command):
+            logger.debug(f"Agent command policy: block '{command}' (shell operators)")
             return False
 
         for pattern in agent.allow_commands:

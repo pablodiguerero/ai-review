@@ -50,3 +50,4 @@ class ReviewDirectLLMGateway(ReviewLLMGatewayProtocol):
         except Exception as error:
             logger.exception(f"LLM request failed: {error}")
             await hook.emit_chat_error(prompt, prompt_system)
+            return ""

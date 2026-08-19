@@ -5,7 +5,7 @@ import aiofiles
 from ai_review.config import settings
 from ai_review.libs.logger import get_logger
 from ai_review.services.artifacts.schema.base import BaseArtifactSchema
-from ai_review.services.artifacts.schema.llm import LLMArtifactSchema, LLMArtifactDataSchema
+from ai_review.services.artifacts.schema.llm import LLMArtifactSchema, LLMArtifactDataSchema, LLMArtifactAgentSchema
 from ai_review.services.artifacts.schema.vcs import (
     VCSInlineArtifactSchema,
     VCSInlineArtifactDataSchema,
@@ -41,6 +41,8 @@ class ArtifactsService(ArtifactsServiceProtocol):
         artifact_file = artifacts_dir / f"{artifact.id}.json"
 
         try:
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+
             async with aiofiles.open(artifact_file, "w", encoding="utf-8") as aiofile:
                 await aiofile.write(artifact.model_dump_json(indent=2))
 
@@ -57,7 +59,8 @@ class ArtifactsService(ArtifactsServiceProtocol):
             prompt: str,
             response: str,
             prompt_system: str,
-            cost_report: CostReportSchema | None = None
+            cost_report: CostReportSchema | None = None,
+            agent: LLMArtifactAgentSchema | None = None,
     ) -> str | None:
         artifact = LLMArtifactSchema(
             data=LLMArtifactDataSchema(
@@ -65,6 +68,7 @@ class ArtifactsService(ArtifactsServiceProtocol):
                 response=response,
                 prompt_system=prompt_system,
                 cost_report=cost_report,
+                agent=agent,
             )
         )
 

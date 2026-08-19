@@ -18,18 +18,20 @@ class OpenAILLMClient(LLMClientProtocol):
         self.http_client_v2 = get_openai_v2_http_client()
 
     async def chat_v1(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
-        request = OpenAIChatRequestSchema(
-            model=self.meta.model,
-            messages=[
+        request_fields = {
+            "model": self.meta.model,
+            "messages": [
                 OpenAIMessageSchema(role="system", content=prompt_system),
                 OpenAIMessageSchema(role="user", content=prompt),
             ],
-            max_tokens=self.meta.max_tokens,
-            temperature=self.meta.temperature,
-            response_format={"type": "json_object"} if json_mode else None,
-            stream=self.meta.stream,
-            stream_options=OpenAIStreamOptionsSchema() if self.meta.stream else None,
-        )
+            "max_tokens": self.meta.max_tokens,
+            "temperature": self.meta.temperature,
+            "response_format": {"type": "json_object"} if json_mode else None,
+            "stream": self.meta.stream,
+            "stream_options": OpenAIStreamOptionsSchema() if self.meta.stream else None,
+        }
+        request_fields.update(self.meta.extra_body or {})
+        request = OpenAIChatRequestSchema(**request_fields)
         response = await self.http_client_v1.chat(request)
         return ChatResultSchema(
             text=response.first_text,
@@ -39,15 +41,18 @@ class OpenAILLMClient(LLMClientProtocol):
         )
 
     async def chat_v2(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
-        request = OpenAIResponsesRequestSchema(
-            model=self.meta.model,
-            input=[
+        request_fields = {
+            "model": self.meta.model,
+            "input": [
                 OpenAIInputMessageSchema(role="system", content=prompt_system),
                 OpenAIInputMessageSchema(role="user", content=prompt),
             ],
-            temperature=self.meta.temperature,
-            max_output_tokens=self.meta.max_tokens,
-        )
+            "temperature": self.meta.temperature,
+            "max_output_tokens": self.meta.max_tokens,
+            "text": {"format": {"type": "json_object"}} if json_mode else None,
+        }
+        request_fields.update(self.meta.extra_body or {})
+        request = OpenAIResponsesRequestSchema(**request_fields)
         response = await self.http_client_v2.chat(request)
         return ChatResultSchema(
             text=response.first_text,
@@ -57,7 +62,7 @@ class OpenAILLMClient(LLMClientProtocol):
         )
 
     async def chat(self, prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
-        if self.meta.is_v2_model:
+        if self.meta.use_responses_api:
             return await self.chat_v2(prompt, prompt_system, json_mode=json_mode)
 
         return await self.chat_v1(prompt, prompt_system, json_mode=json_mode)

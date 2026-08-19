@@ -64,12 +64,14 @@ async def test_save_disabled(
         monkeypatch: pytest.MonkeyPatch,
         artifacts_service: ArtifactsService
 ):
+    artifacts_dir = tmp_path / "nested" / "llm"
+
     monkeypatch.setattr(
         settings,
         "artifacts",
         ArtifactsConfig(
-            llm_dir=tmp_path,
-            vcs_dir=tmp_path,
+            llm_dir=artifacts_dir,
+            vcs_dir=artifacts_dir,
             llm_enabled=False,
         )
     )
@@ -80,12 +82,42 @@ async def test_save_disabled(
 
     out = await artifacts_service.save(
         artifact=artifact,
-        artifacts_dir=tmp_path,
+        artifacts_dir=artifacts_dir,
         artifacts_enabled=False,
     )
 
     assert out is None
-    assert not list(tmp_path.iterdir())
+    assert not artifacts_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_save_creates_nested_directory(
+        tmp_path: Path,
+        artifacts_service: ArtifactsService
+):
+    artifacts_dir = tmp_path / "nested" / "llm"
+    assert not artifacts_dir.exists()
+
+    artifact = LLMArtifactSchema(
+        data=LLMArtifactDataSchema(prompt="p", response="r", prompt_system="sys")
+    )
+
+    out = await artifacts_service.save(
+        artifact=artifact,
+        artifacts_dir=artifacts_dir,
+        artifacts_enabled=True,
+    )
+
+    assert out is not None
+    assert artifacts_dir.is_dir()
+
+    file = artifacts_dir / f"{artifact.id}.json"
+    assert file.exists()
+
+    async with aiofiles.open(file, "r", encoding="utf-8") as f:
+        data = json.loads(await f.read())
+
+    assert data["data"]["prompt"] == "p"
 
 
 @pytest.mark.asyncio

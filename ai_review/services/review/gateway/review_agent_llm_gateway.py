@@ -1,6 +1,8 @@
+from ai_review.config import settings
 from ai_review.libs.logger import get_logger
 from ai_review.services.agent.loop.service import AgentVerificationAborted
 from ai_review.services.agent.loop.types import AgentLoopServiceProtocol
+from ai_review.services.artifacts.schema.llm import LLMArtifactAgentSchema
 from ai_review.services.artifacts.types import ArtifactsServiceProtocol
 from ai_review.services.cost.schema import CalculateCostSchema
 from ai_review.services.cost.types import CostServiceProtocol
@@ -49,15 +51,24 @@ class ReviewAgentLLMGateway(ReviewLLMGatewayProtocol):
                 response=loop_result.final_text,
                 cost_report=report,
                 prompt_system=prompt_system,
+                agent=LLMArtifactAgentSchema(
+                    iterations=loop_result.iterations,
+                    executed_tool_calls=loop_result.executed_tool_calls,
+                    blocked_tool_calls=loop_result.blocked_tool_calls,
+                    stop_reason=loop_result.stop_reason,
+                ),
             )
             return loop_result.final_text
         except AgentVerificationAborted as error:
-            # Falling back here would post the unverified review the abort exists
-            # to prevent; an empty answer makes the runner skip the comment.
             logger.error(f"Agent mode aborted before verifying anything, posting nothing: {error}")
             await hook.emit_chat_error(prompt, prompt_system)
             return ""
         except Exception as error:
+            if not settings.agent.fallback_to_direct_chat:
+                logger.error(f"Agent mode failed, posting nothing: {error}")
+                await hook.emit_chat_error(prompt, prompt_system)
+                return ""
+
             logger.exception(f"Agent mode failed, falling back to direct chat: {error}")
             await hook.emit_chat_error(prompt, prompt_system)
             return await self.fallback_gateway.ask(prompt, prompt_system)

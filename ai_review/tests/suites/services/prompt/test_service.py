@@ -39,7 +39,6 @@ def test_build_summary_request_includes_prompts_and_diffs(fake_prompt_context: P
 
 @pytest.mark.usefixtures("fake_prompts")
 def test_build_summary_request_empty_list(fake_prompt_context: PromptContextSchema) -> None:
-    """Empty diffs list should still produce valid prompt with no diff content."""
     result = PromptService.build_summary_request([], fake_prompt_context)
 
     assert "GLOBAL_SUMMARY" in result
@@ -244,6 +243,7 @@ def test_build_agent_request_contains_history() -> None:
     assert "ORIGINAL_PROMPT" in result
     assert "## Agent history" in result
     assert "Command: rg foo src" in result
+    assert "You can either call a tool or return FINAL." in result
 
 
 @pytest.mark.usefixtures("fake_prompts")
@@ -263,4 +263,9 @@ def test_build_agent_request_force_final_mode() -> None:
     )
     assert "## Agent mode" in result
     assert "Return FINAL only." in result
+    assert "do NOT request any TOOL_CALL" in result
+    assert "do NOT deliberate about further verification" in result
+    assert "mark it low-confidence instead of withholding the review" in result
+    assert "Keep any reasoning brief" in result
+    assert "You can either call a tool or return FINAL." not in result
     assert "No previous steps." in result

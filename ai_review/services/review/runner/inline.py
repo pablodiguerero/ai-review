@@ -9,6 +9,7 @@ from ai_review.services.prompt.adapter import build_prompt_context_from_review_i
 from ai_review.services.prompt.types import PromptServiceProtocol
 from ai_review.services.review.gateway.types import ReviewLLMGatewayProtocol, ReviewCommentGatewayProtocol
 from ai_review.services.review.internal.inline.types import InlineCommentServiceProtocol
+from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.review.runner.types import ReviewRunnerProtocol
 from ai_review.services.vcs.types import ReviewInfoSchema, VCSClientProtocol
 
@@ -38,11 +39,11 @@ class InlineReviewRunner(ReviewRunnerProtocol):
         self.review_llm_gateway = review_llm_gateway
         self.review_comment_gateway = review_comment_gateway
 
-    async def process_file(self, file: str, review_info: ReviewInfoSchema) -> None:
+    async def process_file(self, file: str, review_info: ReviewInfoSchema) -> ReviewOutcome:
         raw_diff = self.git.get_diff_for_file(review_info.base_sha, review_info.head_sha, file)
         if not raw_diff.strip():
             logger.debug(f"No diff for {file}, skipping")
-            return
+            return ReviewOutcome.SKIPPED
 
         rendered_file = self.diff.render_file(
             file=file,
@@ -59,25 +60,38 @@ class InlineReviewRunner(ReviewRunnerProtocol):
         comments.root = self.policy.apply_for_inline_comments(comments.root)
         if not comments.root:
             logger.info(f"No inline comments for file: {file}")
-            return
+            return ReviewOutcome.EMPTY
 
         logger.info(f"Posting {len(comments.root)} inline comments to {file}")
         await self.review_comment_gateway.process_inline_comments(comments)
+        return ReviewOutcome.POSTED
 
-    async def run(self) -> None:
+    async def run(self) -> ReviewOutcome:
         await hook.emit_inline_review_start()
 
         comments = await self.review_comment_gateway.get_inline_comments()
         if comments:
             logger.info(f"Detected {len(comments)} existing AI inline comments, skipping inline review")
-            return
+            return ReviewOutcome.SKIPPED
 
         review_info = await self.vcs.get_review_info()
         logger.info(f"Starting inline review: {len(review_info.changed_files)} files changed")
 
         changed_files = self.policy.apply_for_files(review_info.changed_files)
-        await bounded_gather([
+        outcomes = await bounded_gather([
             self.process_file(changed_file, review_info)
             for changed_file in changed_files
         ])
         await hook.emit_inline_review_complete(self.cost.aggregate())
+
+        failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+        for failure in failures:
+            logger.error(f"Inline review failed for a file: {failure}")
+
+        if any(outcome == ReviewOutcome.POSTED for outcome in outcomes if isinstance(outcome, ReviewOutcome)):
+            return ReviewOutcome.POSTED
+        if failures:
+            return ReviewOutcome.EMPTY
+        if any(outcome == ReviewOutcome.EMPTY for outcome in outcomes):
+            return ReviewOutcome.EMPTY
+        return ReviewOutcome.SKIPPED

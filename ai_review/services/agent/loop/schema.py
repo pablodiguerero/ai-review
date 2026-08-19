@@ -62,6 +62,9 @@ class AgentLoopResultSchema(BaseModel):
     traces: list[AgentTraceSchema] = Field(default_factory=list)
     final_text: str
     stop_reason: str
+    iterations: int = 0
+    executed_tool_calls: int = 0
+    blocked_tool_calls: int = 0
 
     @property
     def total_tokens(self) -> int:

@@ -23,9 +23,15 @@ You can request shell commands for read-only repository exploration (policy enfo
 Typical useful operations:
 
 - file listing (`ls`)
-- file reading (`cat`)
+- file reading (`cat`, `head`, `tail`)
+- line counting (`wc`)
+- reading a file in ranges (`sed -n 'A,Bp' FILE`)
 - code search (`rg`, `grep`)
+- file search (`find`, read-only)
 - repository inspection (`git status`, `git show`, `git diff`, `git log`, `git rev-parse`, `git ls-files`)
+
+Exactly one plain command per `TOOL_CALL` — no pipes, no `&&`, no redirects. Read big files in ranges with
+`sed -n 'A,Bp' FILE` or `head`/`tail` instead of dumping the whole file.
 
 Do not request destructive or mutating commands.
 

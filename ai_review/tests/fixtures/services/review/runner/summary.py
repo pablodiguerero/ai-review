@@ -7,17 +7,20 @@ from ai_review.services.policy.types import PolicyServiceProtocol
 from ai_review.services.prompt.types import PromptServiceProtocol
 from ai_review.services.review.gateway.types import ReviewCommentGatewayProtocol, ReviewLLMGatewayProtocol
 from ai_review.services.review.internal.summary.types import SummaryCommentServiceProtocol
+from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.review.runner.summary import SummaryReviewRunner
 from ai_review.services.review.runner.types import ReviewRunnerProtocol
 from ai_review.services.vcs.types import VCSClientProtocol
 
 
 class FakeSummaryReviewRunner(ReviewRunnerProtocol):
-    def __init__(self):
+    def __init__(self, outcome: ReviewOutcome = ReviewOutcome.POSTED):
         self.calls = []
+        self.outcome = outcome
 
-    async def run(self) -> None:
+    async def run(self) -> ReviewOutcome:
         self.calls.append(("run", {}))
+        return self.outcome
 
 
 @pytest.fixture

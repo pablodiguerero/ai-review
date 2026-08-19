@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from ai_review.services.artifacts.schema.base import BaseArtifactSchema
+from ai_review.services.artifacts.schema.llm import LLMArtifactAgentSchema
 from ai_review.services.artifacts.service import ArtifactsService
 from ai_review.services.artifacts.types import ArtifactsServiceProtocol
 from ai_review.services.cost.schema import CostReportSchema
@@ -32,7 +33,8 @@ class FakeArtifactsService(ArtifactsServiceProtocol):
             prompt: str,
             response: str,
             prompt_system: str,
-            cost_report: CostReportSchema | None = None
+            cost_report: CostReportSchema | None = None,
+            agent: LLMArtifactAgentSchema | None = None,
     ) -> str | None:
         self.calls.append((
             "save_llm",
@@ -41,6 +43,7 @@ class FakeArtifactsService(ArtifactsServiceProtocol):
                 "response": response,
                 "prompt_system": prompt_system,
                 "cost_report": cost_report,
+                "agent": agent,
             }
         ))
         return "fake-llm-id"

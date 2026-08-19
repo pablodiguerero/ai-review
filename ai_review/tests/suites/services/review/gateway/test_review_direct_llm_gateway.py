@@ -14,7 +14,6 @@ async def test_ask_happy_path(
         fake_cost_service: FakeCostService,
         fake_artifacts_service: FakeArtifactsService,
 ):
-    """Should call LLM, calculate cost, save artifacts, and return text."""
     fake_llm_client.responses["chat"] = ChatResultSchema(text="FAKE_RESPONSE")
 
     result = await review_direct_llm_gateway.ask("PROMPT", "SYSTEM_PROMPT")
@@ -36,7 +35,6 @@ async def test_ask_warns_on_empty_response(
         fake_cost_service: FakeCostService,
         fake_artifacts_service: FakeArtifactsService,
 ):
-    """Should warn if LLM returns an empty response."""
     fake_llm_client.responses["chat"] = ChatResultSchema(text="")
 
     result = await review_direct_llm_gateway.ask("PROMPT", "SYSTEM_PROMPT")
@@ -76,8 +74,6 @@ async def test_ask_handles_llm_error(
         fake_llm_client: FakeLLMClient,
         review_direct_llm_gateway: ReviewDirectLLMGateway,
 ):
-    """Should handle exceptions gracefully and log error."""
-
     async def failing_chat(prompt: str, prompt_system: str):
         raise RuntimeError("LLM connection failed")
 
@@ -86,6 +82,6 @@ async def test_ask_handles_llm_error(
     result = await review_direct_llm_gateway.ask("PROMPT", "SYSTEM_PROMPT")
     output = capsys.readouterr().out
 
-    assert result is None
+    assert result == ""
     assert "LLM request failed" in output
     assert "RuntimeError" in output

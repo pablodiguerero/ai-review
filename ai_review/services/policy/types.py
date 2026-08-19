@@ -8,6 +8,9 @@ class PolicyServiceProtocol(Protocol):
     def should_agent_run_command(self, command: str) -> bool:
         ...
 
+    def command_has_shell_operators(self, command: str) -> bool:
+        ...
+
     def apply_for_files(self, files: list[str]) -> list[str]:
         ...
 

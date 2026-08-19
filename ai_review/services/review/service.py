@@ -20,6 +20,7 @@ from ai_review.services.review.internal.summary_reply.service import SummaryComm
 from ai_review.services.review.runner.context import ContextReviewRunner
 from ai_review.services.review.runner.inline import InlineReviewRunner
 from ai_review.services.review.runner.inline_reply import InlineReplyReviewRunner
+from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.review.runner.summary import SummaryReviewRunner
 from ai_review.services.review.runner.summary_reply import SummaryReplyReviewRunner
 from ai_review.services.vcs.factory import get_vcs_client
@@ -129,14 +130,14 @@ class ReviewService:
             review_comment_gateway=self.review_comment_gateway
         )
 
-    async def run_inline_review(self) -> None:
-        await self.inline_review_runner.run()
+    async def run_inline_review(self) -> ReviewOutcome:
+        return await self.inline_review_runner.run()
 
     async def run_context_review(self) -> None:
         await self.context_review_runner.run()
 
-    async def run_summary_review(self) -> None:
-        await self.summary_review_runner.run()
+    async def run_summary_review(self) -> ReviewOutcome:
+        return await self.summary_review_runner.run()
 
     async def run_inline_reply_review(self) -> None:
         await self.inline_reply_review_runner.run()
