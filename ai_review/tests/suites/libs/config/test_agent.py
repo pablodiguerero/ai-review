@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -13,7 +15,13 @@ def test_agent_config_defaults() -> None:
     assert config.max_command_output_chars == 8_000
     assert config.fallback_to_direct_chat is False
     assert config.deadline_seconds is None
+    assert config.checkpoint_dir is None
     assert len(config.allow_commands) > 0
+
+
+def test_agent_config_checkpoint_dir_can_be_set() -> None:
+    config = AgentConfig(checkpoint_dir=Path("./.cache/agent"))
+    assert config.checkpoint_dir == Path("./.cache/agent")
 
 
 def test_agent_config_rejects_invalid_limits() -> None:

@@ -2,9 +2,11 @@ import asyncio
 
 import pytest
 
+from ai_review.services.agent.checkpoint.schema import AgentCheckpointSchema
 from ai_review.services.agent.loop.service import AgentLoopService, AgentVerificationAborted
 from ai_review.services.agent.tool.schema import AgentToolResultSchema
 from ai_review.services.llm.types import ChatResultSchema
+from ai_review.tests.fixtures.services.agent.checkpoint import FakeAgentCheckpointService
 from ai_review.tests.fixtures.services.agent.tool import FakeAgentToolService
 from ai_review.tests.fixtures.services.llm import FakeLLMClient
 from ai_review.tests.fixtures.services.prompt import FakePromptService
@@ -751,3 +753,273 @@ async def test_run_is_isolated_across_concurrent_executions(
     assert len(result_b.traces) == 2
     assert result_a.traces[0].step.command == "ls a"
     assert result_b.traces[0].step.command == "ls b"
+
+
+@pytest.mark.asyncio
+async def test_force_final_recovers_when_first_attempt_raises_and_second_succeeds(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+) -> None:
+    agent_loop_service.empty_response_retries = 0
+    agent_loop_service.force_final_attempts = 2
+
+    calls: list[int] = []
+
+    async def chat(prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
+        calls.append(1)
+        if len(calls) == 1:
+            return ChatResultSchema(text="not-json")
+        if len(calls) == 2:
+            raise RuntimeError("stream error")
+        return ChatResultSchema(text='{"action":"FINAL","content":"recovered"}')
+
+    monkeypatch.setattr(fake_llm_client, "chat", chat)
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM")
+
+    assert result.stop_reason == "forced_final"
+    assert result.final_text == "recovered"
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_force_final_reraises_last_error_when_every_attempt_fails(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+) -> None:
+    agent_loop_service.empty_response_retries = 0
+    agent_loop_service.force_final_attempts = 2
+
+    calls: list[int] = []
+
+    async def chat(prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
+        calls.append(1)
+        if len(calls) == 1:
+            return ChatResultSchema(text="not-json")
+        raise RuntimeError(f"boom-{len(calls)}")
+
+    monkeypatch.setattr(fake_llm_client, "chat", chat)
+
+    with pytest.raises(RuntimeError, match="boom-3"):
+        await agent_loop_service.run("PROMPT", "SYSTEM")
+
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_force_final_stops_without_further_calls_when_deadline_exhausted_after_failure(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+) -> None:
+    agent_loop_service.deadline_seconds = 1
+    agent_loop_service.llm_request_timeout = 10
+    agent_loop_service.force_final_attempts = 3
+
+    clock_values = iter([0.0])
+    agent_loop_service.clock = lambda: next(clock_values, 100.0)
+
+    calls: list[int] = []
+
+    async def chat(prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
+        calls.append(1)
+        raise RuntimeError("stream stalled")
+
+    monkeypatch.setattr(fake_llm_client, "chat", chat)
+
+    with pytest.raises(RuntimeError, match="stream stalled"):
+        await agent_loop_service.run("PROMPT", "SYSTEM")
+
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_touch_checkpoint_when_key_not_provided(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            '{"action":"TOOL_CALL","command":"ls"}',
+            '{"action":"FINAL","content":"done"}',
+        ]),
+    )
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM")
+
+    assert result.stop_reason == "final"
+    assert fake_agent_checkpoint_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_saves_checkpoint_after_each_iteration_and_on_success(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            '{"action":"TOOL_CALL","command":"ls"}',
+            '{"action":"FINAL","content":"done"}',
+        ]),
+    )
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="k1")
+
+    assert result.stop_reason == "final"
+    save_calls = [call for call in fake_agent_checkpoint_service.calls if call[0] == "save"]
+    assert len(save_calls) >= 2
+
+    stored = fake_agent_checkpoint_service.store["k1"]
+    assert stored.finished_iterations is True
+    assert stored.executed_tool_calls == 1
+    assert stored.iterations == 2
+    assert all(call[0] != "delete" for call in fake_agent_checkpoint_service.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_resumes_from_checkpoint_with_restored_counters(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    fake_agent_checkpoint_service.store["k1"] = AgentCheckpointSchema(
+        key="k1",
+        traces=[],
+        executed_tool_calls=1,
+        blocked_tool_calls=0,
+        iterations=2,
+        context_used=10,
+        signatures=["ls"],
+        finished_iterations=False,
+        created_at="2026-08-19T00:00:00+00:00",
+    )
+
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat(['{"action":"FINAL","content":"done"}']),
+    )
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="k1")
+
+    assert result.stop_reason == "final"
+    assert result.iterations == 3
+    assert result.executed_tool_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_run_finished_iterations_checkpoint_skips_straight_to_force_final(
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    fake_agent_checkpoint_service.store["k1"] = AgentCheckpointSchema(
+        key="k1",
+        traces=[],
+        executed_tool_calls=2,
+        blocked_tool_calls=0,
+        iterations=5,
+        context_used=10,
+        signatures=["ls"],
+        finished_iterations=True,
+        created_at="2026-08-19T00:00:00+00:00",
+    )
+
+    calls: list[int] = []
+
+    async def chat(prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
+        calls.append(1)
+        return ChatResultSchema(text='{"action":"FINAL","content":"resumed-final"}')
+
+    monkeypatch.setattr(fake_llm_client, "chat", chat)
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="k1")
+    output = capsys.readouterr().out
+
+    assert result.stop_reason == "forced_final"
+    assert result.final_text == "resumed-final"
+    assert len(calls) == 1
+    assert "resumed from checkpoint (finished_iterations=true): going straight to force-final" in output
+
+
+@pytest.mark.asyncio
+async def test_run_persists_checkpoint_after_successful_forced_final_with_clean_traces(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_tool_service: FakeAgentToolService,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    agent_loop_service.min_tool_calls = 0
+    agent_loop_service.max_iterations = 1
+
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            '{"action":"TOOL_CALL","command":"ls"}',
+            '{"action":"FINAL","content":"forced-done"}',
+        ]),
+    )
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="k1")
+
+    assert result.stop_reason == "forced_final"
+    stored = fake_agent_checkpoint_service.store["k1"]
+    assert stored.finished_iterations is True
+    assert len(stored.traces) == 1
+    assert stored.traces[0].step.command == "ls"
+    assert all(call[0] != "delete" for call in fake_agent_checkpoint_service.calls)
+
+
+@pytest.mark.asyncio
+async def test_second_run_with_finished_checkpoint_makes_exactly_one_llm_call_and_publishes(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    agent_loop_service.max_iterations = 1
+    agent_loop_service.force_final_attempts = 2
+
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            "not-json",
+            '{"action":"TOOL_CALL","command":"cat x"}',
+            '{"action":"TOOL_CALL","command":"cat y"}',
+        ]),
+    )
+
+    first_result = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="retry-key")
+
+    assert first_result.stop_reason == "forced_final_no_review"
+    assert fake_agent_checkpoint_service.store["retry-key"].finished_iterations is True
+
+    calls: list[int] = []
+
+    async def chat(prompt: str, prompt_system: str, json_mode: bool = False) -> ChatResultSchema:
+        calls.append(1)
+        return ChatResultSchema(text='{"action":"FINAL","content":"published-on-retry"}')
+
+    monkeypatch.setattr(fake_llm_client, "chat", chat)
+
+    second_result = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="retry-key")
+
+    assert len(calls) == 1
+    assert second_result.stop_reason == "forced_final"
+    assert second_result.final_text == "published-on-retry"

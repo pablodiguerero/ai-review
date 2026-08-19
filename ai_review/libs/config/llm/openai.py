@@ -37,13 +37,6 @@ class OpenAIMetaConfig(LLMMetaConfig):
         return self.is_v2_model
 
     @model_validator(mode="after")
-    def validate_stream_is_supported(self):
-        if self.stream and self.use_responses_api:
-            raise ValueError(f"Streaming is not implemented for the responses API model {self.model}")
-
-        return self
-
-    @model_validator(mode="after")
     def validate_extra_body_does_not_override_reserved_keys(self):
         if not self.extra_body:
             return self

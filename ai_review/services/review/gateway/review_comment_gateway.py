@@ -13,6 +13,10 @@ from ai_review.services.vcs.types import VCSClientProtocol, ReviewThreadSchema, 
 logger = get_logger("REVIEW_COMMENT_GATEWAY")
 
 
+def body_has_tag(body: str, tag: str) -> bool:
+    return any(line.strip() == tag for line in (body or "").splitlines())
+
+
 class ReviewCommentGateway(ReviewCommentGatewayProtocol):
     def __init__(self, vcs: VCSClientProtocol, artifacts: ArtifactsServiceProtocol):
         self.vcs = vcs
@@ -22,7 +26,7 @@ class ReviewCommentGateway(ReviewCommentGatewayProtocol):
         threads = await self.vcs.get_inline_threads()
         inline_threads = [
             thread for thread in threads
-            if any(settings.review.inline_reply_tag in comment.body for comment in thread.comments)
+            if any(body_has_tag(comment.body, settings.review.inline_reply_tag) for comment in thread.comments)
         ]
         logger.info(f"Detected {len(inline_threads)}/{len(threads)} AI inline threads")
         return inline_threads
@@ -31,7 +35,7 @@ class ReviewCommentGateway(ReviewCommentGatewayProtocol):
         threads = await self.vcs.get_general_threads()
         summary_threads = [
             thread for thread in threads
-            if any(settings.review.summary_reply_tag in comment.body for comment in thread.comments)
+            if any(body_has_tag(comment.body, settings.review.summary_reply_tag) for comment in thread.comments)
         ]
         logger.info(f"Detected {len(summary_threads)}/{len(threads)} AI summary threads")
         return summary_threads
@@ -40,7 +44,7 @@ class ReviewCommentGateway(ReviewCommentGatewayProtocol):
         comments = await self.vcs.get_inline_comments()
         inline_comments = [
             comment for comment in comments
-            if settings.review.inline_tag in comment.body
+            if body_has_tag(comment.body, settings.review.inline_tag)
         ]
         logger.info(f"Detected {len(inline_comments)}/{len(comments)} AI inline comments")
         return inline_comments
@@ -49,7 +53,7 @@ class ReviewCommentGateway(ReviewCommentGatewayProtocol):
         comments = await self.vcs.get_general_comments()
         summary_comments = [
             comment for comment in comments
-            if settings.review.summary_tag in comment.body
+            if body_has_tag(comment.body, settings.review.summary_tag)
         ]
         logger.info(f"Detected {len(summary_comments)}/{len(comments)} AI summary comments")
         return summary_comments

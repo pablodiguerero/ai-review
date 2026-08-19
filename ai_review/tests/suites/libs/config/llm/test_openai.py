@@ -39,9 +39,10 @@ def test_openai_meta_config_api_parses_from_string():
     assert meta.api is OpenAIAPI.RESPONSES
 
 
-def test_openai_meta_config_rejects_stream_for_responses_api_models():
-    with pytest.raises(ValidationError, match="Streaming is not implemented"):
-        OpenAIMetaConfig(model="gpt-5", stream=True)
+def test_openai_meta_config_allows_stream_for_responses_api_models():
+    meta = OpenAIMetaConfig(model="gpt-5", stream=True)
+    assert meta.use_responses_api is True
+    assert meta.stream is True
 
 
 def test_openai_meta_config_allows_stream_for_chat_api_models():
@@ -72,9 +73,10 @@ def test_openai_meta_config_allows_stream_for_v2_model_forced_to_chat_api():
     assert meta.stream is True
 
 
-def test_openai_meta_config_rejects_stream_for_chat_model_forced_to_responses_api():
-    with pytest.raises(ValidationError, match="Streaming is not implemented"):
-        OpenAIMetaConfig(model="deepseek-v4-flash", api=OpenAIAPI.RESPONSES, stream=True)
+def test_openai_meta_config_allows_stream_for_chat_model_forced_to_responses_api():
+    meta = OpenAIMetaConfig(model="deepseek-v4-flash", api=OpenAIAPI.RESPONSES, stream=True)
+    assert meta.use_responses_api is True
+    assert meta.stream is True
 
 
 def test_openai_meta_config_extra_body_defaults_to_none():

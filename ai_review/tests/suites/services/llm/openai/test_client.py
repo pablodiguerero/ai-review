@@ -189,3 +189,30 @@ async def test_openai_llm_client_chat_v2_payload_unchanged_when_extra_body_is_no
 def test_openai_meta_config_rejects_extra_body_overriding_model():
     with pytest.raises(ValidationError, match="model"):
         OpenAIMetaConfig(model="gpt-4o-mini", extra_body={"model": "overridden-model"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("openai_v2_http_client_config")
+async def test_openai_llm_client_chat_v2_sends_stream_flag_when_streaming(
+        monkeypatch: pytest.MonkeyPatch,
+        openai_llm_client: OpenAILLMClient,
+        fake_openai_v2_http_client: FakeOpenAIV2HTTPClient,
+):
+    monkeypatch.setattr(settings.llm.meta, "stream", True)
+
+    await openai_llm_client.chat(prompt="prompt", prompt_system="system")
+
+    request = fake_openai_v2_http_client.calls[0][1]["request"]
+    assert request.stream is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("openai_v2_http_client_config")
+async def test_openai_llm_client_chat_v2_omits_stream_by_default(
+        openai_llm_client: OpenAILLMClient,
+        fake_openai_v2_http_client: FakeOpenAIV2HTTPClient,
+):
+    await openai_llm_client.chat(prompt="prompt", prompt_system="system")
+
+    request = fake_openai_v2_http_client.calls[0][1]["request"]
+    assert request.stream is False

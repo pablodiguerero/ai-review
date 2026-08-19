@@ -34,7 +34,8 @@ LLM__META__EXTRA_BODY: '{"reasoning":{"effort":"low"}}'
 - The Go plan base URL is `https://opencode.ai/zen/go/v1` (responses carry `"cost":"0"`); `https://opencode.ai/zen/v1`
   spends pay-as-you-go credits with the same key.
 - `deepseek-v4-flash` is served by `/chat/completions` (`LLM__META__API=CHAT`, streaming optional and off by
-  default); `grok-4.5` is served ONLY by `/responses` (`LLM__META__API=RESPONSES`, no streaming).
+  default); `grok-4.5` is served ONLY by `/responses` (`LLM__META__API=RESPONSES`). Streaming is supported on both
+  endpoints; see the grok job note below for why it's turned on there specifically.
 - One image serves both jobs.
 
 ## ⏱️ Time budget arithmetic
@@ -68,6 +69,8 @@ keeps a timeout advisory rather than blocking).
     AI_REVIEW_IMAGE: ghcr.io/pablodiguerero/ai-review:<branch-with-dashes>-<commit-sha>
     AI_REVIEW_MODEL: deepseek-v4-flash
     AI_REVIEW_API: CHAT
+    AI_REVIEW_STREAM: "false"
+    AI_REVIEW_TIMEOUT: "300"
     AI_REVIEW_EXTRA_BODY: '{"thinking":{"type":"disabled"}}'
     AI_REVIEW_SUMMARY_TAG: "#ai-review-summary"
     AI_REVIEW_SUMMARY_REPLY_TAG: "#ai-review-reply"
@@ -86,12 +89,12 @@ keeps a timeout advisory rather than blocking).
       -e LLM__PROVIDER="OPENAI" \
       -e LLM__META__MODEL="$AI_REVIEW_MODEL" \
       -e LLM__META__API="$AI_REVIEW_API" \
-      -e LLM__META__STREAM="false" \
+      -e LLM__META__STREAM="$AI_REVIEW_STREAM" \
       -e LLM__META__MAX_TOKENS="32000" \
       -e LLM__META__TEMPERATURE="0.3" \
       -e LLM__META__EXTRA_BODY="$AI_REVIEW_EXTRA_BODY" \
       -e LLM__HTTP_CLIENT__API_URL="https://opencode.ai/zen/go/v1" \
-      -e LLM__HTTP_CLIENT__TIMEOUT="300" \
+      -e LLM__HTTP_CLIENT__TIMEOUT="$AI_REVIEW_TIMEOUT" \
       -e LLM__HTTP_CLIENT__CONNECT_TIMEOUT="10" \
       -e VCS__PROVIDER="GITLAB" \
       -e VCS__PIPELINE__PROJECT_ID="$CI_PROJECT_ID" \
@@ -122,6 +125,8 @@ ai_review_grok_job:
   variables:
     AI_REVIEW_MODEL: grok-4.5
     AI_REVIEW_API: RESPONSES
+    AI_REVIEW_STREAM: "true"
+    AI_REVIEW_TIMEOUT: "150"
     AI_REVIEW_EXTRA_BODY: '{}'
     AI_REVIEW_SUMMARY_TAG: "#ai-review-grok-summary"
     AI_REVIEW_SUMMARY_REPLY_TAG: "#ai-review-grok-reply"
@@ -145,6 +150,14 @@ secret committed in it is still read and sent to the LLM gateway like any other 
 
 ## 📝 Notes
 
+- `AI_REVIEW_STREAM="true"` + `AI_REVIEW_TIMEOUT="150"` on the grok job: the first `/responses` request to
+  grok-4.5 on this gateway frequently stalls with no bytes at all until the read timeout, while a repeated request
+  usually answers in seconds. Streaming lets the client detect a stall (no SSE bytes within `LLM__HTTP_CLIENT__TIMEOUT`)
+  and retry once at zero cost, since nothing billable was generated before the drop — so a shorter timeout here
+  means faster stall detection, not a smaller answer budget. deepseek stays non-streaming (`AI_REVIEW_STREAM="false"`,
+  `AI_REVIEW_TIMEOUT="300"`) since it isn't affected by this stall. With `AI_REVIEW_TIMEOUT=150` the "Time budget
+  arithmetic" formula above gives grok a smaller hard cap than the 40-minute job `timeout:`, which stays generous
+  on purpose.
 - `OPENCODE_ZEN_API_KEY` = the Go plan key (project CI variable, masked). `DEEPSEEK_API_KEY` is no longer read.
 - `AI_REVIEW_EXTRA_BODY='{"thinking":{"type":"disabled"}}'` on the deepseek job cuts reasoning tokens and per-step
   time roughly 10x on this gateway; even with thinking disabled, reviews still run slower during DeepSeek's peak
@@ -159,8 +172,14 @@ secret committed in it is still read and sent to the LLM gateway like any other 
   `LLM__META__API=RESPONSES`); update CLAUDE.md lines claiming the gateway needs `stream: true`.
 - client-app: new job; copy `.ai-review/prompts` from expert-app and adapt, or run with default prompts (drop
   `PROMPT__SUMMARY_PROMPT_FILES`).
-- Grok tags must not contain the automatic job's tag as a substring (comment lookup is a substring match).
+- Comment tag lookup matches a standalone line of the comment body, not a substring, so `#ai-review-grok-summary`
+  and `#ai-review-summary` never cross-match even though one name contains the other.
 - Do not use `*-free` models. Rotate plaintext credentials that live in the reviewed repositories: the agent sends
   everything it reads to the gateway.
 - Fallback during a gateway outage: `LLM__PROVIDER=OPENROUTER` with the OpenRouter key and model id (config-only
   change).
+- To let a retried job skip tool iterations it already paid for, mount a runner-persistent directory and set
+  `AGENT__CHECKPOINT_DIR`, e.g. add `-v "$HOME/.ai-review-cache:/cache"` to the `docker run` line and
+  `-e AGENT__CHECKPOINT_DIR=/cache`. This only helps on a shell runner where `$HOME` is stable across job retries
+  on the same host (a fresh Docker/Kubernetes executor gets an empty volume every time). The checkpoint key
+  includes `head_sha`, so a new push always starts a clean loop — only a retry of the *same* commit resumes.

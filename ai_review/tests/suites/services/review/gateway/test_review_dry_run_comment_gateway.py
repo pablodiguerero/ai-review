@@ -156,8 +156,8 @@ async def test_clear_inline_comments_dry_run_logs_each_comment(
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway,
 ):
     fake_vcs_client.responses["get_inline_comments"] = [
-        ReviewCommentSchema(id="1", body=f"{settings.review.inline_tag} AI inline"),
-        ReviewCommentSchema(id="2", body=f"{settings.review.inline_tag} AI inline"),
+        ReviewCommentSchema(id="1", body=f"AI inline\n\n{settings.review.inline_tag}"),
+        ReviewCommentSchema(id="2", body=f"AI inline\n\n{settings.review.inline_tag}"),
     ]
 
     await review_dry_run_comment_gateway.clear_inline_comments()
@@ -192,8 +192,8 @@ async def test_clear_summary_comments_dry_run_logs_each_comment(
         review_dry_run_comment_gateway: ReviewDryRunCommentGateway,
 ):
     fake_vcs_client.responses["get_general_comments"] = [
-        ReviewCommentSchema(id="10", body=f"{settings.review.summary_tag} First AI summary"),
-        ReviewCommentSchema(id="11", body=f"{settings.review.summary_tag} Second AI summary"),
+        ReviewCommentSchema(id="10", body=f"First AI summary\n\n{settings.review.summary_tag}"),
+        ReviewCommentSchema(id="11", body=f"Second AI summary\n\n{settings.review.summary_tag}"),
     ]
 
     await review_dry_run_comment_gateway.clear_summary_comments()

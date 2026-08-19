@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -35,3 +36,4 @@ class AgentConfig(BaseModel):
     force_final_attempts: int = Field(default=2, ge=1, le=10)
     fallback_to_direct_chat: bool = False
     deadline_seconds: int | None = Field(default=None, ge=1)
+    checkpoint_dir: Path | None = None

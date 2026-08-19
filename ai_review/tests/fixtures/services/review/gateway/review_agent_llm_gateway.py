@@ -15,8 +15,10 @@ class FakeFallbackReviewLLMGateway(ReviewLLMGatewayProtocol):
         self.calls: list[tuple[str, dict]] = []
         self.responses = responses or {}
 
-    async def ask(self, prompt: str, prompt_system: str) -> str:
-        self.calls.append(("ask", {"prompt": prompt, "prompt_system": prompt_system}))
+    async def ask(self, prompt: str, prompt_system: str, checkpoint_key: str | None = None) -> str:
+        self.calls.append(
+            ("ask", {"prompt": prompt, "prompt_system": prompt_system, "checkpoint_key": checkpoint_key})
+        )
         return self.responses.get("ask", "ONE_SHOT_RESPONSE")
 
 

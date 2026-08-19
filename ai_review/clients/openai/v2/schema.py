@@ -51,3 +51,12 @@ class OpenAIResponsesResponseSchema(BaseModel):
                         results.append(content.text)
 
         return "".join(results).strip()
+
+
+class OpenAIResponsesStreamEventSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    delta: str | None = None
+    message: str | None = None
+    response: dict | None = None

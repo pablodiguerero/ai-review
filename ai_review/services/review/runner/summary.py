@@ -11,9 +11,19 @@ from ai_review.services.review.gateway.types import ReviewLLMGatewayProtocol, Re
 from ai_review.services.review.internal.summary.types import SummaryCommentServiceProtocol
 from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.review.runner.types import ReviewRunnerProtocol
-from ai_review.services.vcs.types import VCSClientProtocol
+from ai_review.services.vcs.types import ReviewInfoSchema, VCSClientProtocol
 
 logger = get_logger("SUMMARY_REVIEW_RUNNER")
+
+
+def build_summary_checkpoint_key(review_info: ReviewInfoSchema) -> str:
+    pipeline = settings.vcs.pipeline
+    project_id = getattr(pipeline, "project_id", None)
+    merge_request_id = getattr(pipeline, "merge_request_id", None)
+    return (
+        f"{project_id}:{merge_request_id}:{review_info.head_sha}:"
+        f"{settings.llm.meta.model}:{settings.review.summary_tag}"
+    )
 
 
 class SummaryReviewRunner(ReviewRunnerProtocol):
@@ -99,7 +109,8 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
         prompt_context = build_prompt_context_from_review_info(review_info)
         prompt = self.prompt.build_summary_request(rendered_files, prompt_context, prior_feedback=prior_feedback)
         prompt_system = self.prompt.build_system_summary_request(prompt_context)
-        prompt_result = await self.review_llm_gateway.ask(prompt, prompt_system)
+        checkpoint_key = build_summary_checkpoint_key(review_info)
+        prompt_result = await self.review_llm_gateway.ask(prompt, prompt_system, checkpoint_key=checkpoint_key)
 
         summary = self.summary_comment.parse_model_output(prompt_result)
         if not summary.text.strip():

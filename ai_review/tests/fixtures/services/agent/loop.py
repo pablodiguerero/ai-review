@@ -6,6 +6,7 @@ from ai_review.services.agent.loop.service import AgentVerificationAborted
 from ai_review.services.agent.loop.schema import AgentLoopResultSchema
 from ai_review.services.agent.loop.service import AgentLoopService
 from ai_review.services.agent.loop.types import AgentLoopServiceProtocol
+from ai_review.tests.fixtures.services.agent.checkpoint import FakeAgentCheckpointService
 from ai_review.tests.fixtures.services.agent.tool import FakeAgentToolService
 from ai_review.tests.fixtures.services.llm import FakeLLMClient
 from ai_review.tests.fixtures.services.prompt import FakePromptService
@@ -16,8 +17,15 @@ class FakeAgentLoopService(AgentLoopServiceProtocol):
         self.calls: list[tuple[str, dict]] = []
         self.responses = responses or {}
 
-    async def run(self, prompt: str, prompt_system: str) -> AgentLoopResultSchema:
-        self.calls.append(("run", {"prompt": prompt, "prompt_system": prompt_system}))
+    async def run(
+            self,
+            prompt: str,
+            prompt_system: str,
+            checkpoint_key: str | None = None,
+    ) -> AgentLoopResultSchema:
+        self.calls.append(
+            ("run", {"prompt": prompt, "prompt_system": prompt_system, "checkpoint_key": checkpoint_key})
+        )
         if self.responses.get("raise"):
             raise RuntimeError("agent failed")
 
@@ -38,11 +46,13 @@ def agent_loop_service(
         fake_llm_client: FakeLLMClient,
         fake_prompt_service: FakePromptService,
         fake_agent_tool_service: FakeAgentToolService,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
 ) -> AgentLoopService:
     return AgentLoopService(
         llm=fake_llm_client,
         prompt=fake_prompt_service,
         agent_tool=fake_agent_tool_service,
+        checkpoint=fake_agent_checkpoint_service,
     )
 
 

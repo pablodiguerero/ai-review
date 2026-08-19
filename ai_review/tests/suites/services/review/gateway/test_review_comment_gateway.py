@@ -1,7 +1,7 @@
 import pytest
 
 from ai_review.config import settings
-from ai_review.services.review.gateway.review_comment_gateway import ReviewCommentGateway
+from ai_review.services.review.gateway.review_comment_gateway import ReviewCommentGateway, body_has_tag
 from ai_review.services.review.internal.inline.schema import InlineCommentSchema, InlineCommentListSchema
 from ai_review.services.review.internal.inline_reply.schema import InlineCommentReplySchema
 from ai_review.services.review.internal.summary.schema import SummaryCommentSchema
@@ -21,7 +21,7 @@ async def test_get_inline_threads_filters_by_tag(
             id="1",
             kind=ThreadKind.INLINE,
             file="a.py",
-            comments=[ReviewCommentSchema(id="1", body=f"Hello {settings.review.inline_reply_tag}")]
+            comments=[ReviewCommentSchema(id="1", body=f"Hello\n\n{settings.review.inline_reply_tag}")]
         ),
         ReviewThreadSchema(
             id="2",
@@ -48,7 +48,7 @@ async def test_get_summary_threads_filters_by_tag(
         ReviewThreadSchema(
             id="10",
             kind=ThreadKind.SUMMARY,
-            comments=[ReviewCommentSchema(id="1", body=f"AI {settings.review.summary_reply_tag}")]
+            comments=[ReviewCommentSchema(id="1", body=f"AI\n\n{settings.review.summary_reply_tag}")]
         ),
         ReviewThreadSchema(
             id="11",
@@ -71,7 +71,7 @@ async def test_get_inline_comments_filters_only_ai_comments(
         review_comment_gateway: ReviewCommentGateway,
 ):
     fake_vcs_client.responses["get_inline_comments"] = [
-        ReviewCommentSchema(id="1", body=f"{settings.review.inline_tag} AI comment"),
+        ReviewCommentSchema(id="1", body=f"AI comment\n\n{settings.review.inline_tag}"),
         ReviewCommentSchema(id="2", body="Regular inline comment"),
     ]
 
@@ -103,7 +103,7 @@ async def test_get_summary_comments_filters_only_ai_comments(
         review_comment_gateway: ReviewCommentGateway,
 ):
     fake_vcs_client.responses["get_general_comments"] = [
-        ReviewCommentSchema(id="10", body=f"{settings.review.summary_tag} AI summary"),
+        ReviewCommentSchema(id="10", body=f"AI summary\n\n{settings.review.summary_tag}"),
         ReviewCommentSchema(id="11", body="Regular summary"),
     ]
 
@@ -476,8 +476,8 @@ async def test_clear_inline_comments_deletes_all_ai_comments(
         review_comment_gateway: ReviewCommentGateway,
 ):
     fake_vcs_client.responses["get_inline_comments"] = [
-        ReviewCommentSchema(id="1", body=f"{settings.review.inline_tag} comment 1"),
-        ReviewCommentSchema(id="2", body=f"{settings.review.inline_tag} comment 2"),
+        ReviewCommentSchema(id="1", body=f"comment 1\n\n{settings.review.inline_tag}"),
+        ReviewCommentSchema(id="2", body=f"comment 2\n\n{settings.review.inline_tag}"),
     ]
 
     await review_comment_gateway.clear_inline_comments()
@@ -505,8 +505,8 @@ async def test_clear_summary_comments_deletes_all_ai_comments(
         review_comment_gateway: ReviewCommentGateway,
 ):
     fake_vcs_client.responses["get_general_comments"] = [
-        ReviewCommentSchema(id="10", body=f"{settings.review.summary_tag} summary 1"),
-        ReviewCommentSchema(id="11", body=f"{settings.review.summary_tag} summary 2"),
+        ReviewCommentSchema(id="10", body=f"summary 1\n\n{settings.review.summary_tag}"),
+        ReviewCommentSchema(id="11", body=f"summary 2\n\n{settings.review.summary_tag}"),
     ]
 
     await review_comment_gateway.clear_summary_comments()
@@ -534,11 +534,88 @@ async def test_get_summary_comments_excludes_fallback_comments(
         review_comment_gateway: ReviewCommentGateway,
 ):
     fake_vcs_client.responses["get_general_comments"] = [
-        ReviewCommentSchema(id="10", body=f"Summary {settings.review.summary_tag}"),
-        ReviewCommentSchema(id="11", body=f"Fallback {settings.review.inline_fallback_tag}"),
+        ReviewCommentSchema(id="10", body=f"Summary\n\n{settings.review.summary_tag}"),
+        ReviewCommentSchema(id="11", body=f"Fallback\n\n{settings.review.inline_fallback_tag}"),
     ]
 
     result = await review_comment_gateway.get_summary_comments()
 
     assert len(result) == 1
     assert result[0].id == "10"
+
+
+def test_body_has_tag_ignores_tag_mentioned_inside_prose() -> None:
+    body = "This looks similar to the #ai-review-summary format but isn't one."
+    assert not body_has_tag(body, "#ai-review-summary")
+
+
+def test_body_has_tag_matches_tag_on_its_own_trailing_line() -> None:
+    body = "Some review text.\n\n#ai-review-summary"
+    assert body_has_tag(body, "#ai-review-summary")
+
+
+def test_body_has_tag_matches_tag_line_with_surrounding_whitespace() -> None:
+    body = "Some review text.\n\n   #ai-review-summary   "
+    assert body_has_tag(body, "#ai-review-summary")
+
+
+def test_body_has_tag_does_not_cross_match_similarly_named_tags() -> None:
+    grok_body = "Some review text.\n\n#ai-review-grok-summary"
+    assert not body_has_tag(grok_body, "#ai-review-summary")
+    assert body_has_tag(grok_body, "#ai-review-grok-summary")
+
+    deepseek_body = "Some review text.\n\n#ai-review-summary"
+    assert not body_has_tag(deepseek_body, "#ai-review-grok-summary")
+    assert body_has_tag(deepseek_body, "#ai-review-summary")
+
+
+@pytest.mark.asyncio
+async def test_get_summary_comments_ignores_grok_comment_mentioning_deepseek_tag(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_vcs_client: FakeVCSClient,
+        review_comment_gateway: ReviewCommentGateway,
+):
+    monkeypatch.setattr(settings.review, "summary_tag", "#ai-review-summary")
+    fake_vcs_client.responses["get_general_comments"] = [
+        ReviewCommentSchema(
+            id="1",
+            body="A grok review that references #ai-review-summary in prose.\n\n#ai-review-grok-summary",
+        ),
+        ReviewCommentSchema(id="2", body=f"A deepseek review.\n\n{settings.review.summary_tag}"),
+    ]
+
+    result = await review_comment_gateway.get_summary_comments()
+
+    assert len(result) == 1
+    assert result[0].id == "2"
+
+
+@pytest.mark.asyncio
+async def test_process_summary_comment_replace_does_not_delete_comment_merely_mentioning_tag(
+        monkeypatch: pytest.MonkeyPatch,
+        fake_vcs_client: FakeVCSClient,
+        fake_artifacts_service: FakeArtifactsService,
+        review_comment_gateway: ReviewCommentGateway,
+):
+    monkeypatch.setattr(settings.review, "summary_replace_previous", True)
+    monkeypatch.setattr(settings.review, "summary_tag", "#ai-review-summary")
+
+    fake_vcs_client.responses["get_general_comments"] = [
+        ReviewCommentSchema(
+            id="1",
+            body="A grok review that references #ai-review-summary in prose.\n\n#ai-review-grok-summary",
+        ),
+        ReviewCommentSchema(id="2", body=f"A deepseek review.\n\n{settings.review.summary_tag}"),
+    ]
+
+    previous = await review_comment_gateway.get_summary_comments()
+    assert [c.id for c in previous] == ["2"]
+
+    comment = SummaryCommentSchema(text="Updated deepseek review")
+    await review_comment_gateway.process_summary_comment(comment, previous=previous)
+
+    update_calls = [call for call in fake_vcs_client.calls if call[0] == "update_general_comment"]
+    assert len(update_calls) == 1
+    assert update_calls[0][1][0] == "2"
+
+    assert all(call[0] != "delete_general_comment" for call in fake_vcs_client.calls)

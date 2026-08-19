@@ -16,15 +16,15 @@ class AgentAction(StrEnum):
 
 class AgentStepSchema(BaseModel):
     action: AgentAction
-    command: str | None = None
-    content: str | None = None
+    command: str | None = Field(default=None, validate_default=True)
+    content: str | None = Field(default=None, validate_default=True)
 
     @model_validator(mode="after")
     def validate_shape(self):
         if self.action == AgentAction.TOOL_CALL:
             if not (self.command or "").strip():
                 raise ValueError("command is required for TOOL_CALL")
-            if self.content is not None:
+            if self.content:
                 raise ValueError("content must be omitted for TOOL_CALL")
 
         if self.action == AgentAction.FINAL and not self.content:
@@ -45,10 +45,10 @@ class AgentStepSchema(BaseModel):
 
 class AgentTraceSchema(BaseModel):
     step: AgentStepSchema
-    warning: str | None = None
+    warning: str | None = Field(default=None, validate_default=True)
     iteration: int
     raw_output: str
-    tool_output: str | None = None
+    tool_output: str | None = Field(default=None, validate_default=True)
     total_tokens: int | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None

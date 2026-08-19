@@ -1,10 +1,14 @@
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Callable
 
 from ai_review.config import settings
 from ai_review.libs.llm.output_json_parser import LLMOutputJSONParser
 from ai_review.libs.logger import get_logger
+from ai_review.services.agent.checkpoint.schema import AgentCheckpointSchema
+from ai_review.services.agent.checkpoint.service import AgentCheckpointService
+from ai_review.services.agent.checkpoint.types import AgentCheckpointServiceProtocol
 from ai_review.services.agent.loop.schema import (
     AgentAction,
     AgentStepSchema,
@@ -41,11 +45,13 @@ class AgentLoopService(AgentLoopServiceProtocol):
             llm: LLMClientProtocol,
             prompt: PromptServiceProtocol,
             agent_tool: AgentToolServiceProtocol,
+            checkpoint: AgentCheckpointServiceProtocol | None = None,
             clock: Callable[[], float] = time.monotonic,
     ):
         self.llm = llm
         self.prompt = prompt
         self.agent_tool = agent_tool
+        self.checkpoint = checkpoint or AgentCheckpointService()
         self.clock = clock
         self.max_iterations = settings.agent.max_iterations
         self.max_context_chars = settings.agent.max_total_context_chars
@@ -63,6 +69,26 @@ class AgentLoopService(AgentLoopServiceProtocol):
             f"executed_tool_calls={state.executed_tool_calls} "
             f"blocked_tool_calls={state.blocked_tool_calls} stop_reason={stop_reason}"
         )
+
+    async def _save_checkpoint(
+            self,
+            key: str,
+            state: AgentRunState,
+            finished_iterations: bool,
+            traces: list[AgentTraceSchema] | None = None,
+    ) -> None:
+        checkpoint = AgentCheckpointSchema(
+            key=key,
+            traces=traces if traces is not None else list(state.traces),
+            executed_tool_calls=state.executed_tool_calls,
+            blocked_tool_calls=state.blocked_tool_calls,
+            iterations=state.iterations,
+            context_used=state.context_used,
+            signatures=list(state.signatures),
+            finished_iterations=finished_iterations,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        await self.checkpoint.save(key, checkpoint)
 
     async def _chat(
             self,
@@ -142,6 +168,7 @@ class AgentLoopService(AgentLoopServiceProtocol):
 
         agent_prompt_system = self.prompt.build_system_agent_request()
         last_result: ChatResultSchema | None = None
+        last_error: Exception | None = None
 
         for attempt in range(1, self.force_final_attempts + 1):
             if (
@@ -163,7 +190,15 @@ class AgentLoopService(AgentLoopServiceProtocol):
                 original_prompt=prompt,
                 original_prompt_system=prompt_system,
             )
-            last_result = await self._chat(agent_prompt, agent_prompt_system, deadline_at=state.deadline_at)
+
+            try:
+                last_result = await self._chat(agent_prompt, agent_prompt_system, deadline_at=state.deadline_at)
+            except Exception as error:
+                last_error = error
+                logger.warning(f"Force-final attempt {attempt}/{self.force_final_attempts} failed: {error}")
+                continue
+
+            last_error = None
             step = self.parser.parse_output(last_result.text)
             is_final = bool(step and step.action.is_final and (step.content or "").strip())
             logger.debug(
@@ -207,6 +242,9 @@ class AgentLoopService(AgentLoopServiceProtocol):
                     )
                 )
 
+        if last_result is None and last_error is not None:
+            raise last_error
+
         logger.warning(
             f"Force-final produced no valid FINAL after {self.force_final_attempts} attempt(s); "
             f"skipping summary (no comment will be posted)"
@@ -234,8 +272,39 @@ class AgentLoopService(AgentLoopServiceProtocol):
             blocked_tool_calls=state.blocked_tool_calls,
         )
 
-    async def run(self, prompt: str, prompt_system: str) -> AgentLoopResultSchema:
+    async def run(
+            self,
+            prompt: str,
+            prompt_system: str,
+            checkpoint_key: str | None = None,
+    ) -> AgentLoopResultSchema:
         state = AgentRunState()
+        resume_from_iteration = 1
+        finished_iterations = False
+
+        if checkpoint_key:
+            restored = await self.checkpoint.load(checkpoint_key)
+            if restored is not None:
+                state.traces = list(restored.traces)
+                state.signatures = set(restored.signatures)
+                state.executed_tool_calls = restored.executed_tool_calls
+                state.blocked_tool_calls = restored.blocked_tool_calls
+                state.iterations = restored.iterations
+                state.context_used = restored.context_used
+                finished_iterations = restored.finished_iterations
+                resume_from_iteration = restored.iterations + 1
+
+                if finished_iterations:
+                    logger.info(
+                        "Agent loop resumed from checkpoint (finished_iterations=true): "
+                        "going straight to force-final"
+                    )
+                else:
+                    logger.info(
+                        f"Agent loop resumed from checkpoint: iterations={restored.iterations} "
+                        f"executed={restored.executed_tool_calls}"
+                    )
+
         state.start_time = self.clock()
         if self.deadline_seconds is not None:
             state.deadline_at = state.start_time + self.deadline_seconds
@@ -245,7 +314,10 @@ class AgentLoopService(AgentLoopServiceProtocol):
             f"min_tool_calls={self.min_tool_calls}, max_context_chars={self.max_context_chars}"
         )
 
-        for iteration in range(1, self.max_iterations + 1):
+        if finished_iterations:
+            return await self._finish_with_force_final(state, checkpoint_key, prompt, prompt_system)
+
+        for iteration in range(resume_from_iteration, self.max_iterations + 1):
             if state.deadline_at is not None and self.clock() >= state.deadline_at:
                 logger.info(
                     f"Agent loop deadline reached ({self.deadline_seconds}s) before iteration {iteration}; "
@@ -322,9 +394,14 @@ class AgentLoopService(AgentLoopServiceProtocol):
                             completion_tokens=result.completion_tokens,
                         )
                     )
+                    if checkpoint_key:
+                        await self._save_checkpoint(checkpoint_key, state, finished_iterations=False)
                     continue
 
                 logger.info(f"Agent loop iteration {iteration} returned FINAL action")
+                if checkpoint_key:
+                    await self._save_checkpoint(checkpoint_key, state, finished_iterations=True)
+
                 state.traces.append(
                     AgentTraceSchema(
                         step=step,
@@ -362,7 +439,27 @@ class AgentLoopService(AgentLoopServiceProtocol):
                 logger.info("Agent context limit reached, forcing final response")
                 break
 
+            if checkpoint_key:
+                await self._save_checkpoint(checkpoint_key, state, finished_iterations=False)
+
         logger.info("Agent loop finished regular iterations without FINAL action; switching to force-final flow")
+        return await self._finish_with_force_final(state, checkpoint_key, prompt, prompt_system)
+
+    async def _finish_with_force_final(
+            self,
+            state: AgentRunState,
+            checkpoint_key: str | None,
+            prompt: str,
+            prompt_system: str,
+    ) -> AgentLoopResultSchema:
+        if checkpoint_key:
+            await self._save_checkpoint(checkpoint_key, state, finished_iterations=True)
+
+        clean_traces = list(state.traces)
         result = await self.force_final(state=state, prompt=prompt, prompt_system=prompt_system)
         self._log_summary(state, result.stop_reason)
+
+        if checkpoint_key and result.stop_reason == "forced_final":
+            await self._save_checkpoint(checkpoint_key, state, finished_iterations=True, traces=clean_traces)
+
         return result

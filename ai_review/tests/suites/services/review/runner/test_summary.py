@@ -3,8 +3,8 @@ import pytest
 from ai_review.config import settings
 from ai_review.services.review.internal.summary.schema import SummaryCommentSchema
 from ai_review.services.review.runner.outcome import ReviewOutcome
-from ai_review.services.review.runner.summary import SummaryReviewRunner
-from ai_review.services.vcs.types import ReviewCommentSchema
+from ai_review.services.review.runner.summary import SummaryReviewRunner, build_summary_checkpoint_key
+from ai_review.services.vcs.types import ReviewCommentSchema, ReviewInfoSchema
 from ai_review.tests.fixtures.services.cost import FakeCostService
 from ai_review.tests.fixtures.services.diff import FakeDiffService
 from ai_review.tests.fixtures.services.policy import FakePolicyService
@@ -48,6 +48,25 @@ async def test_run_happy_path(
     assert process_call[1]["previous"] == []
 
     assert any(call[0] == "aggregate" for call in fake_cost_service.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_passes_checkpoint_key_built_from_review_info_to_ask(
+        summary_review_runner: SummaryReviewRunner,
+        fake_vcs_client: FakeVCSClient,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+        fake_review_direct_llm_gateway: FakeReviewDirectLLMGateway,
+):
+    fake_review_comment_gateway.responses["get_summary_comments"] = []
+    review_info = ReviewInfoSchema(changed_files=["file.py"], base_sha="A", head_sha="deadbeef")
+    fake_vcs_client.responses["get_review_info"] = review_info
+
+    await summary_review_runner.run()
+
+    ask_call = next(call for call in fake_review_direct_llm_gateway.calls if call[0] == "ask")
+    expected_key = build_summary_checkpoint_key(review_info)
+    assert ask_call[1]["checkpoint_key"] == expected_key
+    assert "deadbeef" in expected_key
 
 
 @pytest.mark.asyncio

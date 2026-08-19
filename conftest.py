@@ -9,6 +9,7 @@ pytest_plugins = (
     "ai_review.tests.fixtures.services.policy",
     "ai_review.tests.fixtures.services.artifacts",
     "ai_review.tests.fixtures.services.agent.tool",
+    "ai_review.tests.fixtures.services.agent.checkpoint",
     "ai_review.tests.fixtures.services.agent.loop",
     "ai_review.tests.fixtures.services.review.base",
     "ai_review.tests.fixtures.services.review.runner.inline",

@@ -9,5 +9,10 @@ class AgentLoopServiceProtocol(Protocol):
     llm: LLMClientProtocol
     prompt: PromptServiceProtocol
 
-    async def run(self, prompt: str, prompt_system: str) -> AgentLoopResultSchema:
+    async def run(
+            self,
+            prompt: str,
+            prompt_system: str,
+            checkpoint_key: str | None = None,
+    ) -> AgentLoopResultSchema:
         ...

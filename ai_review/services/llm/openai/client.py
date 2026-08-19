@@ -50,6 +50,7 @@ class OpenAILLMClient(LLMClientProtocol):
             "temperature": self.meta.temperature,
             "max_output_tokens": self.meta.max_tokens,
             "text": {"format": {"type": "json_object"}} if json_mode else None,
+            "stream": self.meta.stream,
         }
         request_fields.update(self.meta.extra_body or {})
         request = OpenAIResponsesRequestSchema(**request_fields)

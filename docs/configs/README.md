@@ -45,8 +45,14 @@ By default, configs are loaded from the **project root**.
 - `CHAT` — always use `/chat/completions`, regardless of model name
 - `RESPONSES` — always use `/responses`, regardless of model name
 
-Streaming (`LLM__META__STREAM=true`) is only supported on `/chat/completions`; it is rejected at startup when
-`use_responses_api` resolves to `true` (i.e. `AUTO` with a `gpt-5`/`gpt-4.1` model, or an explicit `RESPONSES`).
+Streaming (`LLM__META__STREAM=true`) is supported on both `/chat/completions` and `/responses`. On `/responses`,
+the client parses the SSE event stream and accumulates `output_text` deltas; a stall or dropped connection before
+any content has arrived is retried once at zero cost — nothing billable was generated yet, mirroring how the
+`/chat/completions` client already handles a mid-stream drop. This is useful for gateways/models where the first
+`/responses` request occasionally stalls for the full read timeout with no bytes at all (a repeat request usually
+answers in seconds): pair `LLM__META__STREAM=true` with a shorter `LLM__HTTP_CLIENT__TIMEOUT` so a stall is detected
+and retried well before the job's own timeout. See [../ci/gitlab-opencode-go.md](../ci/gitlab-opencode-go.md) for a
+worked example (grok on the OpenCode Go gateway).
 
 This matters for gateways that route different models to different endpoints, e.g. the OpenCode Go gateway
 (`LLM__HTTP_CLIENT__API_URL=https://opencode.ai/zen/go/v1`), where `deepseek-v4-flash` is only served on
@@ -59,9 +65,8 @@ This matters for gateways that route different models to different endpoints, e.
 `LLM__META__EXTRA_BODY` is a JSON object merged into the outgoing OpenAI-compatible request body (top-level keys),
 letting you pass vendor-specific fields the client doesn't model directly. Keys are rejected at config load time if
 they name one of the fields AI Review manages itself — `stream`, `stream_options`, `messages`, `input`, `model`,
-`response_format`, `text` — since overriding those would bypass the client's own request construction (including the
-streaming-support check). Any other key, e.g. a vendor's reasoning/thinking controls, is merged in as-is. Examples
-for the OpenCode Go gateway:
+`response_format`, `text` — since overriding those would bypass the client's own request construction. Any other
+key, e.g. a vendor's reasoning/thinking controls, is merged in as-is. Examples for the OpenCode Go gateway:
 
 - DeepSeek on `/chat/completions` (`LLM__META__API=CHAT`) — disable reasoning to cut latency and token spend:
   `LLM__META__EXTRA_BODY={"thinking":{"type":"disabled"}}`
@@ -94,13 +99,27 @@ for the OpenCode Go gateway:
   comment (matched by the `REVIEW__SUMMARY_TAG`) in place instead of creating a new one, and delete any older
   duplicates from earlier runs; if the VCS can't update a comment in place, it falls back to creating a new one.
   On GitLab this edits the note directly; on GitHub, Gitea, Bitbucket Cloud/Server, and Azure DevOps — which have
-  no note-update API — it deletes the old comment and creates a new one.
+  no note-update API — it deletes the old comment and creates a new one. A comment is matched to its tag (e.g.
+  `REVIEW__SUMMARY_TAG`) only when some line of the body, once stripped, equals the tag exactly, not by a
+  substring search, so a comment that merely mentions another tag in its prose is never picked up.
 - `REVIEW__SUMMARY_NORMALIZE_TABLES` (bool, default `true`) — before posting, the summary text is passed through a
   deterministic Markdown-table fixer that turns pipe-separated lines lacking outer pipes and/or a `| --- | --- |`
   separator row into valid GFM tables (padding short rows, trimming long ones, and inserting exactly one blank line
   before/after the table), so tables like a "Clean Code Evaluation Table" render correctly on GitLab/GitHub instead
   of as raw pipe-separated text. Content inside fenced ` ``` ` code blocks is never touched. Set to `false` to post
   the model's raw Markdown unchanged.
+- `AGENT__CHECKPOINT_DIR` (path, default `None`) — when set, the agent loop persists its progress (tool traces,
+  counters, signatures) to `<dir>/<sha256 of a key>.json` after every iteration, so a CI job retried after a crash
+  or timeout does not re-pay for tool iterations it already ran: the next run with the same key loads the
+  checkpoint and either continues the regular loop from the next iteration, or — once the regular loop had already
+  finished — skips straight to a single fresh force-final pass and republishes (the summary runner's
+  `REVIEW__SUMMARY_REPLACE_PREVIOUS` then updates the existing comment instead of duplicating it). Only the summary
+  review uses checkpointing today, keyed by project/MR id, `head_sha`, the LLM model, and `REVIEW__SUMMARY_TAG`, so
+  a new push (new `head_sha`) always starts a fresh loop. The checkpoint is never deleted on its own — it is
+  overwritten in place — so a directory outside the job's own throwaway workspace (e.g. a runner-persistent cache
+  mount) is required for it to survive a retry; a broken/unreadable checkpoint file is logged and ignored, and a
+  fresh save simply overwrites it. See [../ci/gitlab-opencode-go.md](../ci/gitlab-opencode-go.md) for a mounted
+  cache example.
 
 `LLM__HTTP_CLIENT__CONNECT_TIMEOUT` is honoured by the OpenAI-compatible clients only; other providers ignore it.
 

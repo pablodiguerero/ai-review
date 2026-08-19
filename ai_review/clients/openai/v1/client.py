@@ -11,6 +11,7 @@ from ai_review.clients.openai.v1.schema import (
     OpenAIStreamUsageSchema,
 )
 from ai_review.clients.openai.v1.types import OpenAIV1HTTPClientProtocol
+from ai_review.clients.openai.streaming import StreamInterrupted
 from ai_review.config import settings
 from ai_review.libs.http.client import HTTPClient
 from ai_review.libs.http.event_hooks.logger import LoggerEventHook
@@ -36,14 +37,6 @@ def chunk_payload_carries_content(payload: str) -> bool:
 
 class OpenAIV1HTTPClientError(HTTPClientError):
     pass
-
-
-class StreamInterrupted(Exception):
-    def __init__(self, error: Exception, consumed: bool):
-        self.error = error
-        self.consumed = consumed
-
-        super().__init__(str(error))
 
 
 class OpenAIV1HTTPClient(HTTPClient, OpenAIV1HTTPClientProtocol):
