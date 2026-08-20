@@ -269,3 +269,27 @@ def test_build_agent_request_force_final_mode() -> None:
     assert "Keep any reasoning brief" in result
     assert "You can either call a tool or return FINAL." not in result
     assert "No previous steps." in result
+
+
+@pytest.mark.usefixtures("fake_prompts")
+def test_build_agent_request_inserts_prior_synopsis_section_when_non_empty() -> None:
+    result = PromptService.build_agent_request(
+        traces=[],
+        force_final=False,
+        original_prompt="TASK",
+        original_prompt_system="FORMAT",
+        prior_synopsis="- round evidence: ls -> nothing suspicious",
+    )
+    assert "## Earlier findings (previous rounds)" in result
+    assert "- round evidence: ls -> nothing suspicious" in result
+
+
+@pytest.mark.usefixtures("fake_prompts")
+def test_build_agent_request_omits_prior_synopsis_section_when_empty() -> None:
+    result = PromptService.build_agent_request(
+        traces=[],
+        force_final=False,
+        original_prompt="TASK",
+        original_prompt_system="FORMAT",
+    )
+    assert "## Earlier findings (previous rounds)" not in result

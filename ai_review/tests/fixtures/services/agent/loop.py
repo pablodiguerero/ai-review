@@ -22,9 +22,18 @@ class FakeAgentLoopService(AgentLoopServiceProtocol):
             prompt: str,
             prompt_system: str,
             checkpoint_key: str | None = None,
+            checkpoint_head_sha: str | None = None,
     ) -> AgentLoopResultSchema:
         self.calls.append(
-            ("run", {"prompt": prompt, "prompt_system": prompt_system, "checkpoint_key": checkpoint_key})
+            (
+                "run",
+                {
+                    "prompt": prompt,
+                    "prompt_system": prompt_system,
+                    "checkpoint_key": checkpoint_key,
+                    "checkpoint_head_sha": checkpoint_head_sha,
+                },
+            )
         )
         if self.responses.get("raise"):
             raise RuntimeError("agent failed")

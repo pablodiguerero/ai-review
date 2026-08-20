@@ -28,13 +28,20 @@ class ReviewAgentLLMGateway(ReviewLLMGatewayProtocol):
         self.agent_loop = agent_loop
         self.fallback_gateway = fallback_gateway
 
-    async def ask(self, prompt: str, prompt_system: str, checkpoint_key: str | None = None) -> str:
+    async def ask(
+            self,
+            prompt: str,
+            prompt_system: str,
+            checkpoint_key: str | None = None,
+            checkpoint_head_sha: str | None = None,
+    ) -> str:
         try:
             await hook.emit_chat_start(prompt, prompt_system)
             loop_result = await self.agent_loop.run(
                 prompt=prompt,
                 prompt_system=prompt_system,
                 checkpoint_key=checkpoint_key,
+                checkpoint_head_sha=checkpoint_head_sha,
             )
 
             report = self.cost.calculate(
@@ -72,4 +79,6 @@ class ReviewAgentLLMGateway(ReviewLLMGatewayProtocol):
 
             logger.exception(f"Agent mode failed, falling back to direct chat: {error}")
             await hook.emit_chat_error(prompt, prompt_system)
-            return await self.fallback_gateway.ask(prompt, prompt_system, checkpoint_key=checkpoint_key)
+            return await self.fallback_gateway.ask(
+                prompt, prompt_system, checkpoint_key=checkpoint_key, checkpoint_head_sha=checkpoint_head_sha
+            )

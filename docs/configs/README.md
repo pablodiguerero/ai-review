@@ -108,18 +108,38 @@ key, e.g. a vendor's reasoning/thinking controls, is merged in as-is. Examples f
   before/after the table), so tables like a "Clean Code Evaluation Table" render correctly on GitLab/GitHub instead
   of as raw pipe-separated text. Content inside fenced ` ``` ` code blocks is never touched. Set to `false` to post
   the model's raw Markdown unchanged.
-- `AGENT__CHECKPOINT_DIR` (path, default `None`) — when set, the agent loop persists its progress (tool traces,
-  counters, signatures) to `<dir>/<sha256 of a key>.json` after every iteration, so a CI job retried after a crash
-  or timeout does not re-pay for tool iterations it already ran: the next run with the same key loads the
-  checkpoint and either continues the regular loop from the next iteration, or — once the regular loop had already
-  finished — skips straight to a single fresh force-final pass and republishes (the summary runner's
-  `REVIEW__SUMMARY_REPLACE_PREVIOUS` then updates the existing comment instead of duplicating it). Only the summary
-  review uses checkpointing today, keyed by project/MR id, `head_sha`, the LLM model, and `REVIEW__SUMMARY_TAG`, so
-  a new push (new `head_sha`) always starts a fresh loop. The checkpoint is never deleted on its own — it is
-  overwritten in place — so a directory outside the job's own throwaway workspace (e.g. a runner-persistent cache
-  mount) is required for it to survive a retry; a broken/unreadable checkpoint file is logged and ignored, and a
-  fresh save simply overwrites it. See [../ci/gitlab-opencode-go.md](../ci/gitlab-opencode-go.md) for a mounted
-  cache example.
+- `AGENT__CHECKPOINT_DIR` (path, default `None`) — when set, the agent loop persists its progress to
+  `<dir>/<sha256 of a key>.json` after every iteration. The checkpoint key is
+  `<project_id>:<merge_request_id>:<LLM__META__MODEL>:<REVIEW__SUMMARY_TAG>` — it deliberately does **not** include
+  `head_sha`, so a single checkpoint file forms a **chain** that evolves across the whole life of an MR (every job
+  retry and every new push to the same MR resumes the same chain instead of starting from scratch). The current
+  `head_sha` is stored inside the checkpoint payload and compared against the commit being reviewed on each run.
+  A checkpoint carries a `stage` that drives what the next run does:
+  - `investigating` — the loop was mid-run (crash/timeout) on the current commit; the next run continues from the
+    next iteration with the same traces, signatures and counters (cheapest replay, no new work required).
+  - `needs_final` — the loop exhausted its iterations on the current commit without a `FINAL`; if the commit hasn't
+    changed, the next run skips straight to a single fresh force-final pass and republishes (the summary runner's
+    `REVIEW__SUMMARY_REPLACE_PREVIOUS` then updates the existing comment instead of duplicating it).
+  - `reviewed` — the loop already produced and posted a review. If the commit hasn't changed, a re-run restarts a
+    new investigation round while keeping the prior tool traces and signatures (so it won't re-run identical
+    commands, but it must still execute at least `AGENT__RESUME_MIN_NEW_TOOL_CALLS` new read-only commands before a
+    `FINAL` is accepted again). If the commit *has* changed (a new push), the prior round's tool traces are folded
+    into a compact text synopsis (kept under the `## Earlier findings (previous rounds)` heading in the prompt),
+    traces and signatures are reset, and a full fresh investigation round runs against the new diff — the model
+    still remembers what earlier rounds found without re-paying for every tool call. Either way `round` increments
+    by one.
+  - `needs_final`/`investigating` on a *different* `head_sha` are treated the same as `reviewed` + new commit: the
+    evidence is folded into the synopsis and a fresh round starts, because the code underneath it changed.
+  `AGENT__RESUME_MIN_NEW_TOOL_CALLS` (int, default `2`) — when a run starts a new investigation round on top of a
+  resumed checkpoint, the model must execute at least this many *new* tool commands (in addition to any inherited
+  `AGENT__MIN_TOOL_CALLS` floor) before a `FINAL` is accepted; a premature `FINAL` is nudged back into the loop the
+  same way an `AGENT__MIN_TOOL_CALLS` violation is. `AGENT__MAX_TRACE_HISTORY` (int, default `16`) — the maximum
+  number of raw tool traces kept in a checkpoint/prompt at once; older traces are folded into the running synopsis
+  instead of being dropped, so long chains stay bounded in size without losing earlier findings. The checkpoint is
+  never deleted on its own — it is overwritten in place — so a directory outside the job's own throwaway workspace
+  (e.g. a runner-persistent cache mount) is required for it to survive a retry; a broken/unreadable checkpoint file
+  is logged and ignored, and a fresh save simply overwrites it. Only the summary review uses checkpointing today.
+  See [../ci/gitlab-opencode-go.md](../ci/gitlab-opencode-go.md) for a mounted cache example.
 
 `LLM__HTTP_CLIENT__CONNECT_TIMEOUT` is honoured by the OpenAI-compatible clients only; other providers ignore it.
 

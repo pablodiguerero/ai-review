@@ -14,5 +14,6 @@ class AgentLoopServiceProtocol(Protocol):
             prompt: str,
             prompt_system: str,
             checkpoint_key: str | None = None,
+            checkpoint_head_sha: str | None = None,
     ) -> AgentLoopResultSchema:
         ...

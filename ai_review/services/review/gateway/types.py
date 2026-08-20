@@ -15,7 +15,13 @@ class ReviewLLMGatewayProtocol(Protocol):
     cost: CostServiceProtocol
     artifacts: ArtifactsServiceProtocol
 
-    async def ask(self, prompt: str, prompt_system: str, checkpoint_key: str | None = None) -> str:
+    async def ask(
+            self,
+            prompt: str,
+            prompt_system: str,
+            checkpoint_key: str | None = None,
+            checkpoint_head_sha: str | None = None,
+    ) -> str:
         ...
 
 

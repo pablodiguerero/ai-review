@@ -37,3 +37,5 @@ class AgentConfig(BaseModel):
     fallback_to_direct_chat: bool = False
     deadline_seconds: int | None = Field(default=None, ge=1)
     checkpoint_dir: Path | None = None
+    resume_min_new_tool_calls: int = Field(default=2, ge=0, le=50)
+    max_trace_history: int = Field(default=16, ge=1, le=200)

@@ -16,6 +16,7 @@ class PromptServiceProtocol(Protocol):
             force_final: bool,
             original_prompt: str,
             original_prompt_system: str,
+            prior_synopsis: str = "",
     ) -> str:
         ...
 

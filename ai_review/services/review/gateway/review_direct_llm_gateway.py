@@ -20,7 +20,13 @@ class ReviewDirectLLMGateway(ReviewLLMGatewayProtocol):
         self.cost = cost
         self.artifacts = artifacts
 
-    async def ask(self, prompt: str, prompt_system: str, checkpoint_key: str | None = None) -> str:
+    async def ask(
+            self,
+            prompt: str,
+            prompt_system: str,
+            checkpoint_key: str | None = None,
+            checkpoint_head_sha: str | None = None,
+    ) -> str:
         try:
             await hook.emit_chat_start(prompt, prompt_system)
             result = await self.llm.chat(prompt, prompt_system)

@@ -66,7 +66,15 @@ async def test_run_passes_checkpoint_key_built_from_review_info_to_ask(
     ask_call = next(call for call in fake_review_direct_llm_gateway.calls if call[0] == "ask")
     expected_key = build_summary_checkpoint_key(review_info)
     assert ask_call[1]["checkpoint_key"] == expected_key
-    assert "deadbeef" in expected_key
+    assert "deadbeef" not in expected_key
+    assert ask_call[1]["checkpoint_head_sha"] == "deadbeef"
+
+
+def test_checkpoint_key_is_stable_across_different_head_shas_for_the_same_mr_model_and_tag() -> None:
+    first = build_summary_checkpoint_key(ReviewInfoSchema(changed_files=[], base_sha="A", head_sha="sha1"))
+    second = build_summary_checkpoint_key(ReviewInfoSchema(changed_files=[], base_sha="A", head_sha="sha2"))
+
+    assert first == second
 
 
 @pytest.mark.asyncio

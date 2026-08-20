@@ -31,6 +31,7 @@ class PromptService(PromptServiceProtocol):
             force_final: bool,
             original_prompt: str,
             original_prompt_system: str,
+            prior_synopsis: str = "",
     ) -> str:
         force_final_mode = (
             "Return FINAL only. The tool budget is exhausted: do NOT request any TOOL_CALL and do NOT "
@@ -42,10 +43,16 @@ class PromptService(PromptServiceProtocol):
         mode = force_final_mode if force_final else "You can either call a tool or return FINAL."
         history = format_traces(traces)
         agent_prompt = cls.prepare_prompt(settings.prompt.load_agent(), PromptContextSchema())
+        synopsis = (
+            f"## Earlier findings (previous rounds)\n{prior_synopsis}\n\n"
+            if prior_synopsis
+            else ""
+        )
 
         return (
             f"{agent_prompt}\n\n"
             f"## Agent mode\n{mode}\n\n"
+            f"{synopsis}"
             f"## Task output format\n{original_prompt_system}\n\n"
             f"## Task\n{original_prompt}\n\n"
             f"## Agent history\n{history}\n\n"

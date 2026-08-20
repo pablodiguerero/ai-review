@@ -108,6 +108,20 @@ async def test_agent_gateway_falls_back_to_default_gateway_on_error_when_enabled
 
 
 @pytest.mark.asyncio
+async def test_agent_gateway_forwards_checkpoint_key_and_head_sha_to_agent_loop_run(
+        review_agent_llm_gateway: ReviewAgentLLMGateway,
+        fake_agent_loop_service: FakeAgentLoopService,
+) -> None:
+    await review_agent_llm_gateway.ask(
+        "PROMPT", "SYSTEM_PROMPT", checkpoint_key="k1", checkpoint_head_sha="sha1"
+    )
+
+    run_call = next(call for call in fake_agent_loop_service.calls if call[0] == "run")
+    assert run_call[1]["checkpoint_key"] == "k1"
+    assert run_call[1]["checkpoint_head_sha"] == "sha1"
+
+
+@pytest.mark.asyncio
 async def test_agent_gateway_calculates_zero_cost_for_missing_trace_tokens(
         review_agent_llm_gateway: ReviewAgentLLMGateway,
         fake_cost_service: FakeCostService,

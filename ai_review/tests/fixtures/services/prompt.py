@@ -22,6 +22,7 @@ class FakePromptService(PromptServiceProtocol):
             force_final: bool,
             original_prompt: str,
             original_prompt_system: str,
+            prior_synopsis: str = "",
     ) -> str:
         self.calls.append((
             "build_agent_request",
@@ -30,6 +31,7 @@ class FakePromptService(PromptServiceProtocol):
                 "force_final": force_final,
                 "original_prompt": original_prompt,
                 "original_prompt_system": original_prompt_system,
+                "prior_synopsis": prior_synopsis,
             }
         ))
         return "AGENT_LOOP_PROMPT"
@@ -103,7 +105,6 @@ def fake_prompt_service() -> FakePromptService:
 
 @pytest.fixture
 def fake_prompts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch methods of settings.prompt to return dummy values."""
     monkeypatch.setattr(PromptConfig, "load_agent", lambda self: ["GLOBAL_AGENT", "AGENT_PROMPT"])
     monkeypatch.setattr(PromptConfig, "load_inline", lambda self: ["GLOBAL_INLINE", "INLINE_PROMPT"])
     monkeypatch.setattr(PromptConfig, "load_context", lambda self: ["GLOBAL_CONTEXT", "CONTEXT_PROMPT"])
@@ -128,7 +129,6 @@ def fake_prompts(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def fake_prompt_context() -> PromptContextSchema:
-    """Builds a context object that reflects the new unified review schema."""
     return PromptContextSchema(
         review_title="Fix login bug",
         review_description="Some description",

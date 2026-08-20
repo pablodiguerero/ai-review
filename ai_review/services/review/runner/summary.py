@@ -20,10 +20,7 @@ def build_summary_checkpoint_key(review_info: ReviewInfoSchema) -> str:
     pipeline = settings.vcs.pipeline
     project_id = getattr(pipeline, "project_id", None)
     merge_request_id = getattr(pipeline, "merge_request_id", None)
-    return (
-        f"{project_id}:{merge_request_id}:{review_info.head_sha}:"
-        f"{settings.llm.meta.model}:{settings.review.summary_tag}"
-    )
+    return f"{project_id}:{merge_request_id}:{settings.llm.meta.model}:{settings.review.summary_tag}"
 
 
 class SummaryReviewRunner(ReviewRunnerProtocol):
@@ -110,7 +107,9 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
         prompt = self.prompt.build_summary_request(rendered_files, prompt_context, prior_feedback=prior_feedback)
         prompt_system = self.prompt.build_system_summary_request(prompt_context)
         checkpoint_key = build_summary_checkpoint_key(review_info)
-        prompt_result = await self.review_llm_gateway.ask(prompt, prompt_system, checkpoint_key=checkpoint_key)
+        prompt_result = await self.review_llm_gateway.ask(
+            prompt, prompt_system, checkpoint_key=checkpoint_key, checkpoint_head_sha=review_info.head_sha
+        )
 
         summary = self.summary_comment.parse_model_output(prompt_result)
         if not summary.text.strip():

@@ -16,7 +16,17 @@ def test_agent_config_defaults() -> None:
     assert config.fallback_to_direct_chat is False
     assert config.deadline_seconds is None
     assert config.checkpoint_dir is None
+    assert config.resume_min_new_tool_calls == 2
+    assert config.max_trace_history == 16
     assert len(config.allow_commands) > 0
+
+
+def test_agent_config_rejects_invalid_resume_and_trace_history_limits() -> None:
+    with pytest.raises(ValidationError):
+        AgentConfig(resume_min_new_tool_calls=-1)
+
+    with pytest.raises(ValidationError):
+        AgentConfig(max_trace_history=0)
 
 
 def test_agent_config_checkpoint_dir_can_be_set() -> None:

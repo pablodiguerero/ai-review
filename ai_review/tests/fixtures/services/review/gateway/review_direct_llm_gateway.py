@@ -14,9 +14,23 @@ class FakeReviewDirectLLMGateway(ReviewLLMGatewayProtocol):
         self.calls: list[tuple[str, dict]] = []
         self.responses = responses or {}
 
-    async def ask(self, prompt: str, prompt_system: str, checkpoint_key: str | None = None) -> str:
+    async def ask(
+            self,
+            prompt: str,
+            prompt_system: str,
+            checkpoint_key: str | None = None,
+            checkpoint_head_sha: str | None = None,
+    ) -> str:
         self.calls.append(
-            ("ask", {"prompt": prompt, "prompt_system": prompt_system, "checkpoint_key": checkpoint_key})
+            (
+                "ask",
+                {
+                    "prompt": prompt,
+                    "prompt_system": prompt_system,
+                    "checkpoint_key": checkpoint_key,
+                    "checkpoint_head_sha": checkpoint_head_sha,
+                },
+            )
         )
         return self.responses.get("ask", "FAKE_LLM_RESPONSE")
 

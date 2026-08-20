@@ -181,5 +181,10 @@ secret committed in it is still read and sent to the LLM gateway like any other 
 - To let a retried job skip tool iterations it already paid for, mount a runner-persistent directory and set
   `AGENT__CHECKPOINT_DIR`, e.g. add `-v "$HOME/.ai-review-cache:/cache"` to the `docker run` line and
   `-e AGENT__CHECKPOINT_DIR=/cache`. This only helps on a shell runner where `$HOME` is stable across job retries
-  on the same host (a fresh Docker/Kubernetes executor gets an empty volume every time). The checkpoint key
-  includes `head_sha`, so a new push always starts a clean loop — only a retry of the *same* commit resumes.
+  on the same host (a fresh Docker/Kubernetes executor gets an empty volume every time). The checkpoint key is
+  `project_id:merge_request_id:model:summary_tag` — it does not include `head_sha` — so a single checkpoint now
+  forms a chain for the whole MR: a bare retry of the same commit resumes cheaply (continues an in-progress loop,
+  or replays straight to force-final), while a rerun on a *new* commit still reuses the checkpoint but advances it
+  into a genuinely new review round, folding the previous round's tool evidence into a compact synopsis instead of
+  re-running every command from scratch. See [../configs/README.md](../configs/README.md) for the full
+  `AGENT__CHECKPOINT_DIR` / `AGENT__RESUME_MIN_NEW_TOOL_CALLS` / `AGENT__MAX_TRACE_HISTORY` semantics.

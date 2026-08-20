@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_review.services.agent.checkpoint.schema import AgentCheckpointSchema
+from ai_review.services.agent.checkpoint.schema import AgentCheckpointSchema, AgentCheckpointStage
 from ai_review.services.agent.checkpoint.service import AgentCheckpointService
 from ai_review.services.agent.loop.schema import AgentAction, AgentStepSchema, AgentTraceSchema
 
@@ -10,14 +10,17 @@ from ai_review.services.agent.loop.schema import AgentAction, AgentStepSchema, A
 def make_checkpoint(key: str) -> AgentCheckpointSchema:
     return AgentCheckpointSchema(
         key=key,
+        head_sha="deadbeef",
+        round=1,
+        stage=AgentCheckpointStage.INVESTIGATING,
         traces=[],
         executed_tool_calls=2,
         blocked_tool_calls=1,
         iterations=3,
         context_used=42,
         signatures=["ls", "cat a.py"],
-        finished_iterations=False,
         created_at="2026-08-19T00:00:00+00:00",
+        updated_at="2026-08-19T00:00:00+00:00",
     )
 
 
@@ -37,6 +40,8 @@ async def test_save_and_load_round_trip_with_tool_call_trace(
 ) -> None:
     checkpoint = AgentCheckpointSchema(
         key="key-1",
+        head_sha="deadbeef",
+        stage=AgentCheckpointStage.INVESTIGATING,
         traces=[
             AgentTraceSchema(
                 step=AgentStepSchema(action=AgentAction.TOOL_CALL, command="ls"),
@@ -50,8 +55,8 @@ async def test_save_and_load_round_trip_with_tool_call_trace(
         iterations=1,
         context_used=7,
         signatures=["ls"],
-        finished_iterations=False,
         created_at="2026-08-19T00:00:00+00:00",
+        updated_at="2026-08-19T00:00:00+00:00",
     )
 
     await agent_checkpoint_service.save("key-1", checkpoint)
