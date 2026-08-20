@@ -1,6 +1,7 @@
 import pytest
 
 from ai_review.config import settings
+from ai_review.services.diff.schema import DiffFileSchema
 from ai_review.services.review.internal.summary.schema import SummaryCommentSchema
 from ai_review.services.review.runner.outcome import ReviewOutcome
 from ai_review.services.review.runner.summary import SummaryReviewRunner, build_summary_checkpoint_key
@@ -35,7 +36,7 @@ async def test_run_happy_path(
     vcs_calls = [call[0] for call in fake_vcs_client.calls]
     assert "get_review_info" in vcs_calls
 
-    assert any(call[0] == "render_files" for call in fake_diff_service.calls)
+    assert any(call[0] == "render_batches" for call in fake_diff_service.calls)
     assert any(call[0] == "apply_for_files" for call in fake_policy_service.calls)
     assert any(call[0] == "build_summary_request" for call in fake_prompt_service.calls)
     assert any(call[0] == "ask" for call in fake_review_direct_llm_gateway.calls)
@@ -148,4 +149,102 @@ async def test_run_skips_when_empty_summary_from_llm(
 
     assert outcome == ReviewOutcome.EMPTY
     assert any(call[0] == "ask" for call in fake_review_direct_llm_gateway.calls)
+    assert not any(call[0] == "process_summary_comment" for call in fake_review_comment_gateway.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_batched_posts_one_consolidated_comment_with_min_score_and_per_batch_checkpoint_keys(
+        summary_review_runner: SummaryReviewRunner,
+        fake_vcs_client: FakeVCSClient,
+        fake_diff_service: FakeDiffService,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+        fake_review_direct_llm_gateway: FakeReviewDirectLLMGateway,
+        fake_summary_comment_service: FakeSummaryCommentService,
+):
+    fake_review_comment_gateway.responses["get_summary_comments"] = []
+    review_info = ReviewInfoSchema(changed_files=["a.py", "b.py"], base_sha="A", head_sha="deadbeef")
+    fake_vcs_client.responses["get_review_info"] = review_info
+    fake_diff_service.responses["render_batches"] = [
+        [DiffFileSchema(file="a.py", diff="diff a")],
+        [DiffFileSchema(file="b.py", diff="diff b")],
+    ]
+    fake_review_direct_llm_gateway.responses["ask"] = [
+        "Findings for a.\n\nOverall score: 9",
+        "Findings for b.\n\nOverall score: 6",
+    ]
+
+    outcome = await summary_review_runner.run()
+
+    assert outcome == ReviewOutcome.POSTED
+
+    ask_calls = [call for call in fake_review_direct_llm_gateway.calls if call[0] == "ask"]
+    assert len(ask_calls) == 2
+    base_key = build_summary_checkpoint_key(review_info)
+    assert ask_calls[0][1]["checkpoint_key"] == f"{base_key}:b1"
+    assert ask_calls[1][1]["checkpoint_key"] == f"{base_key}:b2"
+    assert ask_calls[0][1]["checkpoint_head_sha"] == "deadbeef"
+    assert ask_calls[1][1]["checkpoint_head_sha"] == "deadbeef"
+    assert "This part covers these files: a.py" in ask_calls[0][1]["prompt"]
+    assert "This part covers these files: b.py" in ask_calls[1][1]["prompt"]
+
+    parse_call = next(
+        call for call in fake_summary_comment_service.calls
+        if call[0] == "parse_model_output"
+    )
+    consolidated_text = parse_call[1]["output"]
+    assert "Batched review: 2 parts covering 2 of 2 changed files." in consolidated_text
+    assert "## Part 1/2 — 1 files" in consolidated_text
+    assert "## Part 2/2 — 1 files" in consolidated_text
+    assert "Findings for a." in consolidated_text
+    assert "Findings for b." in consolidated_text
+    assert consolidated_text.strip().endswith("Overall score: 6.0")
+
+    assert any(call[0] == "process_summary_comment" for call in fake_review_comment_gateway.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_batched_treats_one_failed_part_as_skipped_but_still_posts(
+        summary_review_runner: SummaryReviewRunner,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+        fake_diff_service: FakeDiffService,
+        fake_review_direct_llm_gateway: FakeReviewDirectLLMGateway,
+        fake_summary_comment_service: FakeSummaryCommentService,
+):
+    fake_review_comment_gateway.responses["get_summary_comments"] = []
+    fake_diff_service.responses["render_batches"] = [
+        [DiffFileSchema(file="a.py", diff="diff a")],
+        [DiffFileSchema(file="b.py", diff="diff b")],
+    ]
+    fake_review_direct_llm_gateway.responses["ask"] = ["", "Findings for b.\n\nOverall score: 6"]
+
+    outcome = await summary_review_runner.run()
+
+    assert outcome == ReviewOutcome.POSTED
+    parse_call = next(
+        call for call in fake_summary_comment_service.calls
+        if call[0] == "parse_model_output"
+    )
+    consolidated_text = parse_call[1]["output"]
+    assert "## Part 1/2 — no result (skipped)" in consolidated_text
+    assert "## Part 2/2 — 1 files" in consolidated_text
+    assert consolidated_text.strip().endswith("Overall score: 6.0")
+
+
+@pytest.mark.asyncio
+async def test_run_batched_all_parts_empty_returns_empty_without_posting(
+        summary_review_runner: SummaryReviewRunner,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+        fake_diff_service: FakeDiffService,
+        fake_review_direct_llm_gateway: FakeReviewDirectLLMGateway,
+):
+    fake_review_comment_gateway.responses["get_summary_comments"] = []
+    fake_diff_service.responses["render_batches"] = [
+        [DiffFileSchema(file="a.py", diff="diff a")],
+        [DiffFileSchema(file="b.py", diff="diff b")],
+    ]
+    fake_review_direct_llm_gateway.responses["ask"] = ["", ""]
+
+    outcome = await summary_review_runner.run()
+
+    assert outcome == ReviewOutcome.EMPTY
     assert not any(call[0] == "process_summary_comment" for call in fake_review_comment_gateway.calls)

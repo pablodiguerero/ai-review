@@ -141,6 +141,41 @@ key, e.g. a vendor's reasoning/thinking controls, is merged in as-is. Examples f
   is logged and ignored, and a fresh save simply overwrites it. Only the summary review uses checkpointing today.
   See [../ci/gitlab-opencode-go.md](../ci/gitlab-opencode-go.md) for a mounted cache example.
 
+- `REVIEW__MAX_DIFF_CHARS` (int, default `1_200_000`) — caps the aggregate size of the rendered diff fed to the
+  summary/context (and summary-reply) prompts. `render_files` keeps whole files in order while the running total
+  of `diff` characters stays within the budget, and stops adding once the next whole file would push it over; at
+  least one file is always kept, so if the very first file alone exceeds the budget, that one file's `diff` is
+  truncated to the budget with a trailing `... file diff truncated ...` marker instead of being dropped entirely.
+  Whenever anything was omitted or truncated, a final synthetic entry (`file="ai-review: truncation notice"`) is
+  appended naming how many of the total changed files are shown, how many were omitted, and roughly how many
+  characters were left out — so the model is told explicitly it only saw a partial diff instead of silently
+  reviewing an incomplete one. Set to `None`/unset in YAML/JSON, or leave the env var unset, to disable the cap
+  entirely (previous unbounded behaviour). This exists because a very large MR (hundreds of changed files) can
+  render a diff bigger than the model's context window, which otherwise fails the very first agent LLM call with
+  `context_length_exceeded` and aborts the whole run with nothing posted — the cap trades a full review for a
+  guaranteed partial one on such MRs (context/inline/summary-reply runners, and the summary runner whenever the
+  whole diff already fits in one `REVIEW__MAX_DIFF_CHARS` budget). See
+  [../ci/gitlab-opencode-go.md](../ci/gitlab-opencode-go.md).
+- `REVIEW__MAX_DIFF_BATCHES` (int, default `5`) — the summary review (`run-summary`) prefers full coverage over
+  truncation: when the rendered diff doesn't fit in one `REVIEW__MAX_DIFF_CHARS` budget, `render_batches` groups
+  whole files (in order) into up to this many batches, each within the `REVIEW__MAX_DIFF_CHARS` budget, and the
+  runner sends one summary prompt per batch instead of one truncated prompt for everything. A single file whose
+  own diff exceeds the budget becomes its own batch, truncated the same way `REVIEW__MAX_DIFF_CHARS` truncates it
+  for the non-batched runners. Each batch gets its own checkpoint chain (`<checkpoint_key>:b<i>`) under
+  `AGENT__CHECKPOINT_DIR`, so a job retry resumes only the batches that hadn't finished. The per-batch reviews are
+  consolidated into a **single** posted comment: a `Batched review: N parts covering M of T changed files.`
+  header, one `## Part i/N — <n> files` section per batch (a batch whose model call came back empty is rendered as
+  `## Part i/N — no result (skipped)` and excluded from scoring), and a final `Overall score: <min>` line taking
+  the lowest of the per-part `Overall score:` lines (each stripped from its own part). If more files would need
+  more than `REVIEW__MAX_DIFF_BATCHES` batches, the excess files are dropped and a coverage notice
+  (`file="ai-review: coverage notice"`) is appended to the last batch, naming how many files were not reviewed.
+  When everything fits in one batch, behaviour is unchanged from a plain single-pass summary review (one prompt,
+  one `ask` call, no `:b<i>` suffix on the checkpoint key). `REVIEW__MAX_DIFF_BATCHES=1` keeps the file selection
+  identical to the old truncate-only cap (same greedy "keep whole files until the budget is hit" walk), it only
+  differs in wording: the leftover-files marker is the batching path's `ai-review: coverage notice` entry rather
+  than `REVIEW__MAX_DIFF_CHARS`'s `ai-review: truncation notice`. See
+  [../ci/gitlab-opencode-go.md](../ci/gitlab-opencode-go.md).
+
 `LLM__HTTP_CLIENT__CONNECT_TIMEOUT` is honoured by the OpenAI-compatible clients only; other providers ignore it.
 
 The sample files [.env.example](./.env.example), [.ai-review.yaml](./.ai-review.yaml), and [../ci](../ci) `*.yaml`

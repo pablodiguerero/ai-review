@@ -1,17 +1,20 @@
 from ai_review.config import settings
 from ai_review.libs.logger import get_logger
 from ai_review.services.cost.types import CostServiceProtocol
+from ai_review.services.diff.schema import DiffFileSchema
 from ai_review.services.diff.types import DiffServiceProtocol
 from ai_review.services.git.types import GitServiceProtocol
 from ai_review.services.hook import hook
 from ai_review.services.policy.types import PolicyServiceProtocol
 from ai_review.services.prompt.adapter import build_prompt_context_from_review_info
+from ai_review.services.prompt.schema import PromptContextSchema
 from ai_review.services.prompt.types import PromptServiceProtocol
 from ai_review.services.review.gateway.types import ReviewLLMGatewayProtocol, ReviewCommentGatewayProtocol
 from ai_review.services.review.internal.summary.types import SummaryCommentServiceProtocol
 from ai_review.services.review.runner.outcome import ReviewOutcome
+from ai_review.services.review.runner.summary_batches import consolidate_batches, real_files
 from ai_review.services.review.runner.types import ReviewRunnerProtocol
-from ai_review.services.vcs.types import ReviewInfoSchema, VCSClientProtocol
+from ai_review.services.vcs.types import ReviewCommentSchema, ReviewInfoSchema, VCSClientProtocol
 
 logger = get_logger("SUMMARY_REVIEW_RUNNER")
 
@@ -97,26 +100,90 @@ class SummaryReviewRunner(ReviewRunnerProtocol):
 
         logger.info(f"Starting summary review: {len(changed_files)} files changed")
 
-        rendered_files = self.diff.render_files(
+        batches = self.diff.render_batches(
             git=self.git,
             files=changed_files,
             base_sha=review_info.base_sha,
             head_sha=review_info.head_sha,
         )
         prompt_context = build_prompt_context_from_review_info(review_info)
-        prompt = self.prompt.build_summary_request(rendered_files, prompt_context, prior_feedback=prior_feedback)
-        prompt_system = self.prompt.build_system_summary_request(prompt_context)
         checkpoint_key = build_summary_checkpoint_key(review_info)
-        prompt_result = await self.review_llm_gateway.ask(
-            prompt, prompt_system, checkpoint_key=checkpoint_key, checkpoint_head_sha=review_info.head_sha
+
+        if len(batches) <= 1:
+            rendered_files = batches[0] if batches else []
+            prompt = self.prompt.build_summary_request(rendered_files, prompt_context, prior_feedback=prior_feedback)
+            prompt_system = self.prompt.build_system_summary_request(prompt_context)
+            prompt_result = await self.review_llm_gateway.ask(
+                prompt, prompt_system, checkpoint_key=checkpoint_key, checkpoint_head_sha=review_info.head_sha
+            )
+
+            summary = self.summary_comment.parse_model_output(prompt_result)
+            if not summary.text.strip():
+                logger.warning("Summary LLM output was empty, skipping comment")
+                return ReviewOutcome.EMPTY
+
+            logger.info(f"Posting summary review comment ({len(summary.text)} chars)")
+            await self.review_comment_gateway.process_summary_comment(summary, previous=comments)
+            await hook.emit_summary_review_complete(self.cost.aggregate())
+            return ReviewOutcome.POSTED
+
+        return await self._run_batched(
+            batches=batches,
+            prompt_context=prompt_context,
+            prior_feedback=prior_feedback,
+            base_checkpoint_key=checkpoint_key,
+            review_info=review_info,
+            comments=comments,
+            total_changed_files=len(changed_files),
         )
 
-        summary = self.summary_comment.parse_model_output(prompt_result)
-        if not summary.text.strip():
-            logger.warning("Summary LLM output was empty, skipping comment")
+    async def _run_batched(
+            self,
+            batches: list[list[DiffFileSchema]],
+            prompt_context: PromptContextSchema,
+            prior_feedback: str | None,
+            base_checkpoint_key: str,
+            review_info: ReviewInfoSchema,
+            comments: list[ReviewCommentSchema],
+            total_changed_files: int,
+    ) -> ReviewOutcome:
+        total_batches = len(batches)
+        reviewed_files = sum(len(real_files(batch)) for batch in batches)
+        logger.info(f"Batched summary review: {total_batches} batches, {reviewed_files}/{total_changed_files} files")
+
+        prompt_system = self.prompt.build_system_summary_request(prompt_context)
+
+        batch_texts: list[str] = []
+        for i, batch in enumerate(batches, start=1):
+            files_in_batch = real_files(batch)
+            chars_in_batch = sum(len(entry.diff) for entry in batch)
+            logger.info(f"Batch {i}/{total_batches}: {len(files_in_batch)} files, {chars_in_batch} chars")
+
+            banner = (
+                f"Batched review part {i} of {total_batches}. This part covers these files: "
+                f"{', '.join(files_in_batch)}. Give findings and an Overall score for THIS part only.\n\n"
+            )
+            prompt = banner + self.prompt.build_summary_request(batch, prompt_context, prior_feedback=prior_feedback)
+
+            text = await self.review_llm_gateway.ask(
+                prompt,
+                prompt_system,
+                checkpoint_key=f"{base_checkpoint_key}:b{i}",
+                checkpoint_head_sha=review_info.head_sha,
+            )
+            batch_texts.append(text)
+
+        if not any((text or "").strip() for text in batch_texts):
+            logger.warning("All batched summary parts returned empty, skipping comment")
             return ReviewOutcome.EMPTY
 
-        logger.info(f"Posting summary review comment ({len(summary.text)} chars)")
+        consolidated_text = consolidate_batches(batch_texts, batches, total_changed_files)
+        summary = self.summary_comment.parse_model_output(consolidated_text)
+        if not summary.text.strip():
+            logger.warning("Consolidated batched summary was empty, skipping comment")
+            return ReviewOutcome.EMPTY
+
+        logger.info(f"Posting consolidated batched summary review comment ({len(summary.text)} chars)")
         await self.review_comment_gateway.process_summary_comment(summary, previous=comments)
         await hook.emit_summary_review_complete(self.cost.aggregate())
         return ReviewOutcome.POSTED

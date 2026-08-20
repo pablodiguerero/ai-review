@@ -107,6 +107,8 @@ keeps a timeout advisory rather than blocking).
       -e REVIEW__FAIL_ON_EMPTY_RESULT="$AI_REVIEW_FAIL_ON_EMPTY" \
       -e REVIEW__SUMMARY_HEADER="$AI_REVIEW_SUMMARY_HEADER" \
       -e REVIEW__SUMMARY_REPLACE_PREVIOUS="true" \
+      -e REVIEW__MAX_DIFF_CHARS="1200000" \
+      -e REVIEW__MAX_DIFF_BATCHES="5" \
       -e PROMPT__SUMMARY_PROMPT_FILES='["./.ai-review/prompts/summary.md", "./.ai-review/prompts/verify.md"]' \
       -e AGENT__ENABLED="true" \
       -e AGENT__MAX_ITERATIONS="30" \
@@ -158,6 +160,15 @@ secret committed in it is still read and sent to the LLM gateway like any other 
   `AI_REVIEW_TIMEOUT="300"`) since it isn't affected by this stall. With `AI_REVIEW_TIMEOUT=150` the "Time budget
   arithmetic" formula above gives grok a smaller hard cap than the 40-minute job `timeout:`, which stays generous
   on purpose.
+- `REVIEW__MAX_DIFF_CHARS="1200000"` caps the rendered diff sent to the model per request, staying under
+  `deepseek-v4-flash`'s ~1M-token context limit on this gateway. On `run-summary`, `REVIEW__MAX_DIFF_BATCHES="5"`
+  builds on that cap: instead of truncating a huge MR (hundreds of changed files) down to whatever fits in one
+  request, the diff is split into up to 5 whole-file batches (each within `REVIEW__MAX_DIFF_CHARS`), reviewed with
+  separate LLM calls, and consolidated into one posted comment (per-part findings, `Overall score:` = the min
+  across parts) — so large MRs get reviewed in full instead of partially, at proportionally more cost/time (up to
+  5x the calls of a small MR). Only a diff needing more than 5 batches still drops files, noted in the comment. A
+  job retry resumes cheaply: each batch checkpoints separately (`AGENT__CHECKPOINT_DIR`), so only batches that
+  hadn't finished are re-run.
 - `OPENCODE_ZEN_API_KEY` = the Go plan key (project CI variable, masked). `DEEPSEEK_API_KEY` is no longer read.
 - `AI_REVIEW_EXTRA_BODY='{"thinking":{"type":"disabled"}}'` on the deepseek job cuts reasoning tokens and per-step
   time roughly 10x on this gateway; even with thinking disabled, reviews still run slower during DeepSeek's peak

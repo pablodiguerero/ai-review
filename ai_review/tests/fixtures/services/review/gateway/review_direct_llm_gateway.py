@@ -32,7 +32,11 @@ class FakeReviewDirectLLMGateway(ReviewLLMGatewayProtocol):
                 },
             )
         )
-        return self.responses.get("ask", "FAKE_LLM_RESPONSE")
+        response = self.responses.get("ask", "FAKE_LLM_RESPONSE")
+        if isinstance(response, list):
+            index = sum(1 for call in self.calls if call[0] == "ask") - 1
+            return response[index] if index < len(response) else ""
+        return response
 
 
 @pytest.fixture

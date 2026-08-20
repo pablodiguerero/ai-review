@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from ai_review.libs.diff.models import Diff
@@ -7,8 +9,9 @@ from ai_review.services.git.types import GitServiceProtocol
 
 
 class FakeDiffService(DiffServiceProtocol):
-    def __init__(self):
+    def __init__(self, responses: dict[str, Any] | None = None):
         self.calls: list[tuple[str, dict]] = []
+        self.responses = responses or {}
 
     def parse(self, raw_diff: str) -> Diff:
         self.calls.append(("parse", {"raw_diff": raw_diff}))
@@ -39,6 +42,20 @@ class FakeDiffService(DiffServiceProtocol):
             {"git": git, "files": files, "base_sha": base_sha, "head_sha": head_sha},
         ))
         return [DiffFileSchema(file=file, diff=f"FAKE_DIFF for {file}") for file in files]
+
+    def render_batches(
+            self,
+            git: GitServiceProtocol,
+            files: list[str],
+            base_sha: str,
+            head_sha: str,
+    ) -> list[list[DiffFileSchema]]:
+        self.calls.append((
+            "render_batches",
+            {"git": git, "files": files, "base_sha": base_sha, "head_sha": head_sha},
+        ))
+        default = [[DiffFileSchema(file=file, diff=f"FAKE_DIFF for {file}") for file in files]] if files else []
+        return self.responses.get("render_batches", default)
 
 
 @pytest.fixture

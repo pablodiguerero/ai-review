@@ -38,3 +38,5 @@ class ReviewConfig(BaseModel):
     summary_header: str = Field(default="")
     summary_replace_previous: bool = Field(default=False)
     summary_normalize_tables: bool = Field(default=True)
+    max_diff_chars: int | None = Field(default=1_200_000, ge=1000)
+    max_diff_batches: int = Field(default=5, ge=1)

@@ -26,3 +26,12 @@ class DiffServiceProtocol(Protocol):
             head_sha: str,
     ) -> list[DiffFileSchema]:
         ...
+
+    def render_batches(
+            self,
+            git: GitServiceProtocol,
+            files: list[str],
+            base_sha: str,
+            head_sha: str,
+    ) -> list[list[DiffFileSchema]]:
+        ...

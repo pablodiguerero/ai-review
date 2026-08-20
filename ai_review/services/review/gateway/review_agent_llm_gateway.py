@@ -13,6 +13,14 @@ from ai_review.services.review.gateway.types import ReviewLLMGatewayProtocol
 logger = get_logger("REVIEW_AGENT_LLM_GATEWAY")
 
 
+def _log_context_length_hint(error: Exception) -> None:
+    if "context_length_exceeded" in str(error):
+        logger.error(
+            "Likely cause: the rendered diff exceeded the model's context window on the first LLM call. "
+            "Lower REVIEW__MAX_DIFF_CHARS to cap the rendered diff size and get a partial review instead."
+        )
+
+
 class ReviewAgentLLMGateway(ReviewLLMGatewayProtocol):
     def __init__(
             self,
@@ -69,11 +77,13 @@ class ReviewAgentLLMGateway(ReviewLLMGatewayProtocol):
             return loop_result.final_text
         except AgentVerificationAborted as error:
             logger.error(f"Agent mode aborted before verifying anything, posting nothing: {error}")
+            _log_context_length_hint(error)
             await hook.emit_chat_error(prompt, prompt_system)
             return ""
         except Exception as error:
             if not settings.agent.fallback_to_direct_chat:
                 logger.error(f"Agent mode failed, posting nothing: {error}")
+                _log_context_length_hint(error)
                 await hook.emit_chat_error(prompt, prompt_system)
                 return ""
 

@@ -21,6 +21,10 @@ from ai_review.services.git.types import GitServiceProtocol
 
 logger = get_logger("DIFF_SERVICE")
 
+TRUNCATION_MARKER = "\n... file diff truncated ..."
+TRUNCATION_NOTICE_FILE = "ai-review: truncation notice"
+COVERAGE_NOTICE_FILE = "ai-review: coverage notice"
+
 
 class DiffService(DiffServiceProtocol):
     @classmethod
@@ -78,6 +82,26 @@ class DiffService(DiffServiceProtocol):
             base_sha: str,
             head_sha: str,
     ) -> list[DiffFileSchema]:
+        return cls._cap_by_max_diff_chars(cls._render_all(git, files, base_sha, head_sha))
+
+    @classmethod
+    def render_batches(
+            cls,
+            git: GitServiceProtocol,
+            files: list[str],
+            base_sha: str,
+            head_sha: str,
+    ) -> list[list[DiffFileSchema]]:
+        return cls._group_into_batches(cls._render_all(git, files, base_sha, head_sha))
+
+    @classmethod
+    def _render_all(
+            cls,
+            git: GitServiceProtocol,
+            files: list[str],
+            base_sha: str,
+            head_sha: str,
+    ) -> list[DiffFileSchema]:
         annotated: list[DiffFileSchema] = []
         for file in files:
             raw_diff = git.get_diff_for_file(base_sha, head_sha, file)
@@ -95,3 +119,111 @@ class DiffService(DiffServiceProtocol):
             )
 
         return annotated
+
+    @classmethod
+    def _truncate_entry(cls, entry: DiffFileSchema, budget: int) -> DiffFileSchema:
+        cut = max(budget - len(TRUNCATION_MARKER), 0)
+        return DiffFileSchema(file=entry.file, diff=entry.diff[:cut] + TRUNCATION_MARKER)
+
+    @classmethod
+    def _cap_by_max_diff_chars(cls, entries: list[DiffFileSchema]) -> list[DiffFileSchema]:
+        budget = settings.review.max_diff_chars
+        if budget is None or not entries:
+            return entries
+
+        total_chars = sum(len(entry.diff) for entry in entries)
+        if total_chars <= budget:
+            return entries
+
+        kept: list[DiffFileSchema] = []
+        running = 0
+        for entry in entries:
+            entry_len = len(entry.diff)
+
+            if not kept and entry_len > budget:
+                truncated = cls._truncate_entry(entry, budget)
+                kept.append(truncated)
+                running += len(truncated.diff)
+                continue
+
+            if kept and running + entry_len > budget:
+                break
+
+            kept.append(entry)
+            running += entry_len
+
+        kept_chars = sum(len(entry.diff) for entry in kept)
+        omitted_files = len(entries) - len(kept)
+        omitted_chars = total_chars - kept_chars
+
+        logger.warning(
+            f"Diff exceeds REVIEW__MAX_DIFF_CHARS={budget}: keeping {len(kept)}/{len(entries)} files "
+            f"({omitted_files} omitted, ~{omitted_chars} characters not shown)"
+        )
+
+        notice = (
+            f"Only {len(kept)} of {len(entries)} changed files are shown below "
+            f"({omitted_files} files omitted, ~{omitted_chars} characters) because the full diff exceeds "
+            f"REVIEW__MAX_DIFF_CHARS={budget}. This is a partial review of the largest/first files; "
+            f"unshown files were not analyzed."
+        )
+        kept.append(DiffFileSchema(file=TRUNCATION_NOTICE_FILE, diff=notice))
+        return kept
+
+    @classmethod
+    def _group_into_batches(cls, entries: list[DiffFileSchema]) -> list[list[DiffFileSchema]]:
+        if not entries:
+            return []
+
+        budget = settings.review.max_diff_chars
+        if budget is None:
+            return [entries]
+
+        batches: list[list[DiffFileSchema]] = []
+        current: list[DiffFileSchema] = []
+        current_chars = 0
+
+        for entry in entries:
+            entry_len = len(entry.diff)
+
+            if entry_len > budget:
+                if current:
+                    batches.append(current)
+                    current = []
+                    current_chars = 0
+                batches.append([cls._truncate_entry(entry, budget)])
+                continue
+
+            if current and current_chars + entry_len > budget:
+                batches.append(current)
+                current = [entry]
+                current_chars = entry_len
+                continue
+
+            current.append(entry)
+            current_chars += entry_len
+
+        if current:
+            batches.append(current)
+
+        max_batches = settings.review.max_diff_batches
+        if len(batches) <= max_batches:
+            return batches
+
+        kept_batches = batches[:max_batches]
+        dropped_batches = batches[max_batches:]
+        dropped_files = sum(len(batch) for batch in dropped_batches)
+        dropped_chars = sum(len(entry.diff) for batch in dropped_batches for entry in batch)
+        total_files = len(entries)
+
+        logger.warning(
+            f"Diff exceeds REVIEW__MAX_DIFF_BATCHES={max_batches}: dropping {dropped_files}/{total_files} "
+            f"files (~{dropped_chars} characters not reviewed)"
+        )
+
+        notice = (
+            f"{dropped_files} of {total_files} files not reviewed: exceeds "
+            f"REVIEW__MAX_DIFF_BATCHES={max_batches} batches of REVIEW__MAX_DIFF_CHARS={budget}"
+        )
+        kept_batches[-1] = kept_batches[-1] + [DiffFileSchema(file=COVERAGE_NOTICE_FILE, diff=notice)]
+        return kept_batches
