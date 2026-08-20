@@ -1,324 +1,196 @@
 # AI Review
 
-<p align="center">
-  <img src="./docs/assets/logo.png" alt="Axiom logo" width="220" />
-</p>
+AI-powered code review CLI. It runs in CI, reads the diff of a merge/pull request, drives an agent that verifies its
+own claims against the real repository with read-only shell commands, and posts the result as a review comment.
 
-AI-powered code review tool.
+This is a fork of [Nikita-Filonov/ai-review](https://github.com/Nikita-Filonov/ai-review) that has diverged into a
+security- and agent-hardened build focused on running against the OpenCode Go / Zen gateway in CI.
 
-[![CI](https://github.com/Nikita-Filonov/ai-review/actions/workflows/workflow-test.yml/badge.svg)](https://github.com/Nikita-Filonov/ai-review/actions/workflows/workflow-test.yml)
-[![codecov](https://codecov.io/gh/Nikita-Filonov/ai-review/branch/main/graph/badge.svg)](https://codecov.io/gh/Nikita-Filonov/ai-review)
-[![PyPI version](https://img.shields.io/pypi/v/xai-review.svg)](https://pypi.org/project/xai-review/)
-[![License](https://img.shields.io/github/license/Nikita-Filonov/ai-review)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/Nikita-Filonov/ai-review?style=social)](https://github.com/Nikita-Filonov/ai-review/stargazers)
-[![Support](https://img.shields.io/badge/Support-Boosty-orange)](https://boosty.to/ai_review)
+Reviews are advisory: the tool posts comments for a human to read, it does not approve, block, or merge anything by
+itself. Whether a pipeline treats a failed review job as blocking is a CI configuration choice (`allow_failure`), not
+something this tool decides.
 
-_Made with ❤️ by [@NikitaFilonov](https://t.me/sound_right)_
+## Table of Contents
 
----
+- [How it works](#how-it-works)
+- [LLM providers](#llm-providers)
+- [VCS providers](#vcs-providers)
+- [CLI commands](#cli-commands)
+- [Agent hardening and reliability](#agent-hardening-and-reliability)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Documentation](#documentation)
+- [License](#license)
 
-## ❤️ Support AI Review
+## How it works
 
-If AI Review helps you reduce noise in pull requests and saves time in code reviews, consider supporting its
-development.
+1. AI Review reads the merge/pull request diff from the configured VCS provider, using the review mode set by
+   `REVIEW__MODE` (e.g. `FULL_FILE_DIFF`, `ONLY_ADDED_WITH_CONTEXT`, …).
+2. When agent mode is enabled (`AGENT__ENABLED=true`), the model runs a ReAct-style loop: it can issue read-only
+   shell commands (`ls`, `cat`, `head`, `tail`, `wc`, `sed -n`, `rg`, `grep`, `find`, and a handful of read-only
+   `git` subcommands) against the checked-out repository to verify its own claims — checking that a referenced
+   function actually exists, that an import is really unused, that a "missing" test file is really missing — before
+   writing anything down. This is deeper than a single-shot call: the model is required to gather evidence before
+   it is allowed to finish.
+3. The agent's `FINAL` answer becomes the review body. Only a well-formed `FINAL` step is ever posted; a step that
+   doesn't parse or isn't `FINAL` is dropped rather than posted as-is.
+4. The result is posted back to the merge/pull request as a summary comment, and/or as inline comments, a
+   cross-file context review, or a reply into an existing discussion thread, depending on which command is run.
 
-Your support helps to:
+## LLM providers
 
-- improve review accuracy and reduce false positives
-- expand integrations (GitHub, GitLab, Azure DevOps, etc.)
-- develop new features and maintain the project
+Configured via `LLM__PROVIDER` (see `ai_review/services/llm/`):
 
-👉 https://boosty.to/ai_review
+- `OPENAI` — any OpenAI-compatible `/chat/completions` or `/responses` endpoint, including gateways. This is the
+  provider used for the OpenCode Go / Zen gateway.
+- `CLAUDE`
+- `GEMINI`
+- `OLLAMA` — local/self-hosted, for fully offline reviews
+- `BEDROCK`
+- `OPENROUTER`
+- `AZURE_OPENAI`
 
----
+For the `OPENAI` provider, three `LLM__META__*` settings matter for gateway routing:
 
-## 📑 Table of Contents
+- `LLM__META__API` — `AUTO` (default, picks `/responses` for `gpt-5*`/`gpt-4.1*` model prefixes and
+  `/chat/completions` for everything else) | `CHAT` (force `/chat/completions`) | `RESPONSES` (force `/responses`).
+  Needed when a gateway serves different models on different endpoints and the prefix heuristic doesn't apply.
+- `LLM__META__STREAM` (bool, default `false`) — supported on both `/chat/completions` and `/responses`. On
+  `/responses` the client parses the SSE stream and accumulates `output_text` deltas; a stall before any content
+  arrives is retried once at zero cost. Useful for gateways where the first request to a given model occasionally
+  stalls for the full read timeout.
+- `LLM__META__EXTRA_BODY` — a JSON object merged into the outgoing request body, for vendor-specific fields (e.g. a
+  model's reasoning/thinking controls). Keys that would override a field AI Review manages itself (`stream`,
+  `stream_options`, `messages`, `input`, `model`, `response_format`, `text`) are rejected at config load time.
 
-- ✨ [About](#-about)
-- 🧪 [Live Preview](#-live-preview)
-- 🚀 [Quick Start](#-quick-start)
-- ⚙️ [️CI/CD Integration](#-cicd-integration)
-    - 🚀 [GitHub Actions](#-github-actions)
-    - 🚀 [GitLab CI/CD](#-gitlab-cicd)
-- 📘 [Documentation](#-documentation)
-- ⚠️ [Privacy & Responsibility Notice](#-privacy--responsibility-notice)
+See [docs/ci/gitlab-opencode-go.md](./docs/ci/gitlab-opencode-go.md) for the full routing setup against the
+OpenCode Go gateway (`https://opencode.ai/zen/go/v1`), including which models need `CHAT` vs `RESPONSES` and the
+time-budget arithmetic for the agent deadline.
 
----
+## VCS providers
 
-## ✨ About
+Configured via `VCS__PROVIDER` (see `ai_review/services/vcs/`):
 
-**AI Review** is a developer tool that brings **AI-powered code review** directly into your workflow. It helps teams
-improve code quality, enforce consistency, and speed up the review process.
+- `GITLAB`
+- `GITHUB`
+- `BITBUCKET_CLOUD`
+- `BITBUCKET_SERVER`
+- `GITEA`
+- `AZURE_DEVOPS`
 
-✨ Key features:
+## CLI commands
 
-- **Multiple LLM providers** — choose between **OpenAI**, **Claude**, **Gemini**, **Ollama**, **Bedrock**,
-  **OpenRouter**, or **Azure OpenAI** and switch anytime. For OpenAI-compatible gateways, `LLM__META__API`
-  (`AUTO`/`CHAT`/`RESPONSES`) pins a model to `/chat/completions` or `/responses` when auto-detection isn't enough.
-- **VCS integration** — works out of the box with **GitLab**, **GitHub**, **Bitbucket Cloud**, **Bitbucket Server**,
-  **Azure DevOps**, and **Gitea**.
-- **Customizable prompts** — adapt inline, context, and summary reviews to match your team’s coding guidelines.
-- **Agent mode** — iterative ReAct-style loop where the model can **explore the repository** with shell commands
-  (`ls`, `cat`, `rg`, `git`) before producing a final review, giving it deeper context than a single-shot call.
-- **Reply modes** — AI can now **participate in existing review threads**, adding follow-up replies in both inline and
-  summary discussions.
-- **Flexible configuration** — supports `YAML`, `JSON`, and `ENV`, with seamless overrides in CI/CD pipelines.
-- **AI Review runs fully client-side** — it never proxies or inspects your requests.
+All commands are defined in `ai_review/cli/main.py` and exposed through the `ai-review` entry point:
 
-AI Review runs automatically in your CI/CD pipeline and posts both **inline comments**, **summary reviews**, and now
-**AI-generated replies** directly inside your merge requests. With **agent mode** enabled, the model can autonomously
-explore the codebase before reviewing, resulting in more accurate and context-aware feedback. This makes reviews faster,
-more conversational, and still fully under human control.
+| Command | Description |
+|---|---|
+| `ai-review run` | Runs the full pipeline: inline review followed by summary review. |
+| `ai-review run-inline` | Posts line-by-line inline comments on the diff. |
+| `ai-review run-context` | Runs a broader, cross-file review without posting per-line comments. |
+| `ai-review run-summary` | Posts a single summary comment for the whole change. |
+| `ai-review run-inline-reply` | Generates AI replies to existing inline comment threads. |
+| `ai-review run-summary-reply` | Generates an AI reply to the existing summary review thread. |
+| `ai-review clear-inline` | Deletes all AI Review inline comments from the current merge/pull request. |
+| `ai-review clear-summary` | Deletes all AI Review summary comments from the current merge/pull request. |
+| `ai-review show-config` | Prints the fully resolved configuration as JSON — use this to check what a run will actually do before it runs. |
 
----
+## Agent hardening and reliability
 
-## 🧪 Live Preview
+The parts of this fork that differ meaningfully from upstream:
 
-Curious how **AI Review** works in practice? Here are three real Pull Requests reviewed entirely by the tool — one per
-mode:
+- **Read-only command allowlist.** `AGENT__ALLOW_COMMANDS` only permits `ls`, `cat`, `head`, `tail`, `wc`,
+  `sed -n 'A,Bp' FILE`, `rg` (excluding `--pre`/`--pre-glob`/`--hostname-bin`/`--search-zip`/`-z`), `grep`, `find`
+  (excluding its mutating flags: `-exec`, `-execdir`, `-ok`, `-okdir`, `-delete`, `-fprint`, `-fprintf`, `-fls`),
+  and read-only `git` subcommands (`status`, `show`, `diff`, `log`, `rev-parse`, `ls-files`, excluding `--output`).
+  Regardless of the allowlist, unquoted shell operators (`|`, `&&`, `;`, `>`, etc.), embedded newlines, and
+  `/proc/`/`/dev/` paths inside a command are always rejected.
+- **`AGENT__MIN_TOOL_CALLS`** (default `0`) — a floor on how many tool calls the agent must execute before a
+  `FINAL` answer is accepted, so it can't skip verification and go straight to an opinion.
+- **`AGENT__DEADLINE_SECONDS`** (default unset) — a soft wall-clock budget for the whole agent loop; once it
+  elapses, the loop stops calling tools and moves to a forced final answer.
+- **`AGENT__FORCE_FINAL_ATTEMPTS`** (default `2`) — how many forced-final attempts are made if the model won't
+  produce a well-formed `FINAL` on its own (e.g. after the deadline, or after exhausting `AGENT__MAX_ITERATIONS`).
+- **`AGENT__MAX_COMMAND_OUTPUT_CHARS`** (default `8000`, tightened from upstream's `40000`) — caps how much output
+  from a single tool call is fed back into the model's context.
+- **Checkpoint chain** (summary review only) — `AGENT__CHECKPOINT_DIR` persists the agent's progress after every
+  iteration, keyed by `<project_id>:<merge_request_id>:<model>:<summary_tag>` (deliberately not including the
+  commit SHA). This lets a retried job resume an in-progress loop instead of restarting it, and lets a new push to
+  the same MR advance into a fresh review round while reusing the prior round's findings — folded into a compact
+  synopsis — instead of re-running every command from scratch. `AGENT__RESUME_MIN_NEW_TOOL_CALLS` (default `2`)
+  requires that many *new* tool calls before a resumed round accepts `FINAL`; `AGENT__MAX_TRACE_HISTORY` (default
+  `16`) bounds how many raw tool traces are kept before older ones are folded into the synopsis.
+- **One summary comment per model.** `REVIEW__SUMMARY_HEADER` (a `str.format` template rendered with `model=...`,
+  e.g. `"### AI review: {model}"`) labels which model wrote a summary comment, and
+  `REVIEW__SUMMARY_REPLACE_PREVIOUS` makes the summary runner update its own most recent comment in place — matched
+  by `REVIEW__SUMMARY_TAG` as a standalone line, never a substring — instead of piling up duplicates across reruns.
+- **Markdown table normalization.** `REVIEW__SUMMARY_NORMALIZE_TABLES` (default `true`) rewrites pipe-separated
+  text lacking outer pipes or a separator row into valid GFM tables before posting, so tables the model writes
+  loosely still render correctly on GitLab/GitHub. Fenced code blocks are left untouched.
+- **`REVIEW__FAIL_ON_EMPTY_RESULT`** (default `false`) — when `true`, `run`/`run-inline`/`run-summary` exit `1` if
+  the LLM produced no usable review, instead of always exiting `0`.
+- **Config-file pins.** `.ai-review.yaml`/`.ai-review.json`/`.env` are read from the working directory by default
+  and take priority over environment variables — which means a reviewed checkout could otherwise add or edit one of
+  those files to reconfigure the reviewer itself (widen the command allowlist, redirect the LLM/VCS API URL to
+  exfiltrate tokens). Pointing `AI_REVIEW_CONFIG_FILE_YAML`, `AI_REVIEW_CONFIG_FILE_JSON`, and
+  `AI_REVIEW_CONFIG_FILE_ENV` at a path that doesn't exist neutralizes this: a missing config file is skipped, so
+  only environment variables configure the run. See [docs/ci/gitlab-opencode-go.md](./docs/ci/gitlab-opencode-go.md)
+  for a worked example.
+- **Local e2e harness.** `e2e/run_docker_review.sh` runs the actual Docker image (never the host Python) against a
+  real GitLab merge request in dry-run mode and checks the result with `e2e/assert_review.py`, for testing prompt,
+  model, or agent-setting changes before they ship. See [docs/e2e.md](./docs/e2e.md).
 
-| Mode             | Description                                                                                                                                  | 🐙 GitHub                                                             | 🦊 GitLab                                                                  | 🪣 Bitbucket                                                                        |
-|------------------|----------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|----------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
-| 🧩 Inline        | Adds **line-by-line comments** directly in the diff. Focuses on specific code changes.                                                       | [View on GitHub](https://github.com/Nikita-Filonov/ai-review/pull/4)  | [View on GitLab](https://gitlab.com/core8332439/review/-/merge_requests/2) | [View on Bitbucket](https://bitbucket.org/test-5183/test-ai-review/pull-requests/2) |
-| 🧠 Context       | Performs a **broader analysis across multiple files**, detecting cross-file issues and inconsistencies.                                      | [View on GitHub](https://github.com/Nikita-Filonov/ai-review/pull/5)  | [View on GitLab](https://gitlab.com/core8332439/review/-/merge_requests/3) | [View on Bitbucket](https://bitbucket.org/test-5183/test-ai-review/pull-requests/3) |
-| 📄 Summary       | Posts a **concise high-level summary** with key highlights, strengths, and major issues.                                                     | [View on GitHub](https://github.com/Nikita-Filonov/ai-review/pull/6)  | [View on GitLab](https://gitlab.com/core8332439/review/-/merge_requests/4) | [View on Bitbucket](https://bitbucket.org/test-5183/test-ai-review/pull-requests/4) |
-| 💬 Inline Reply  | Generates a **context-aware reply** to an existing inline comment thread. Can clarify decisions, propose fixes, or provide code suggestions. | [View on GitHub](https://github.com/Nikita-Filonov/ai-review/pull/16) | [View on GitLab](https://gitlab.com/core8332439/review/-/merge_requests/5) | [View on Bitbucket](https://bitbucket.org/test-5183/test-ai-review/pull-requests/5) |
-| 💬 Summary Reply | Continues the **summary-level review discussion**, responding to reviewer comments with clarifications, rationale, or actionable next steps. | [View on GitHub](https://github.com/Nikita-Filonov/ai-review/pull/17) | [View on GitLab](https://gitlab.com/core8332439/review/-/merge_requests/6) | [View on Bitbucket](https://bitbucket.org/test-5183/test-ai-review/pull-requests/6) |
+## Quick start
 
-👉 Each review was generated automatically via GitHub Actions using the corresponding mode:
+AI Review ships as a Docker image; there is no local install step. Build/pull the image, then run it with your LLM
+and VCS credentials as environment variables. Minimal example, reviewing a GitLab merge request:
 
 ```bash
-ai-review run-inline
-ai-review run-summary
-ai-review run-context
-ai-review run-inline-reply
-ai-review run-summary-reply
+export LLM__HTTP_CLIENT__API_TOKEN=sk-...
+export VCS__HTTP_CLIENT__API_TOKEN=glpat-...
+
+docker run --rm \
+  -v "$(pwd)":/app -w /app \
+  -e LLM__HTTP_CLIENT__API_TOKEN \
+  -e VCS__HTTP_CLIENT__API_TOKEN \
+  -e LLM__PROVIDER=OPENAI \
+  -e LLM__META__MODEL=gpt-4o-mini \
+  -e LLM__HTTP_CLIENT__API_URL=https://api.openai.com/v1 \
+  -e VCS__PROVIDER=GITLAB \
+  -e VCS__PIPELINE__PROJECT_ID="$CI_PROJECT_ID" \
+  -e VCS__PIPELINE__MERGE_REQUEST_ID="$CI_MERGE_REQUEST_IID" \
+  -e VCS__HTTP_CLIENT__API_URL="$CI_SERVER_URL" \
+  ghcr.io/pablodiguerero/ai-review:<sha> \
+  ai-review run-summary
 ```
 
----
+Passing `-e VAR` without a value (rather than `-e VAR=$VAR`) keeps the secret out of the process list and shell
+history of anything inspecting the `docker run` invocation itself.
 
-## 🚀 Quick Start
+For a complete CI job — agent mode, the OpenCode Go gateway, checkpointing, and the `AI_REVIEW_CONFIG_FILE_*`
+security pins — see [docs/ci/gitlab-opencode-go.md](./docs/ci/gitlab-opencode-go.md).
 
-Install via **pip**:
+Configuration can also come from a `.ai-review.yaml` or `.ai-review.json` file instead of (or combined with)
+environment variables — see [Configuration](#configuration). Run `ai-review show-config` to print the fully
+resolved configuration and confirm what a run will actually do.
 
-```bash
-pip install xai-review
-```
+## Configuration
 
-📦 Available on [PyPI](https://pypi.org/project/xai-review/)
+Every setting shown above, plus timeouts, prompts, artifacts, and logging, is documented in full in
+[docs/configs/README.md](./docs/configs/README.md), including load order between YAML/JSON/ENV/environment
+variables and the `AI_REVIEW_CONFIG_FILE_*` override paths.
 
----
+## Documentation
 
-Or run directly via Docker:
+- [docs/ci](./docs/ci) — CI/CD integration templates (GitHub Actions, GitLab CI, Bitbucket Pipelines, Jenkins,
+  Azure Pipelines), including [docs/ci/gitlab-opencode-go.md](./docs/ci/gitlab-opencode-go.md) for the OpenCode Go
+  gateway setup
+- [docs/cli](./docs/cli) — CLI command reference and usage examples
+- [docs/configs](./docs/configs) — full configuration reference and example `.yaml`/`.json`/`.env` files
+- [docs/hooks](./docs/hooks) — lifecycle hooks reference
+- [docs/prompts](./docs/prompts) — prompt templates (Python/Go, light/strict) and prompt variable reference
+- [docs/troubleshooting](./docs/troubleshooting) — common environment and Git-related issues
+- [docs/e2e.md](./docs/e2e.md) — local Docker-based end-to-end harness for testing changes against a real MR
 
-```bash
-docker run --rm -v $(pwd):/app nikitafilonov/ai-review:latest ai-review run-summary
-```
+## License
 
-🐳 Pull from [DockerHub](https://hub.docker.com/r/nikitafilonov/ai-review)
-
-👉 Before running, create a basic configuration file [.ai-review.yaml](./docs/configs/.ai-review.yaml) in the root of
-your project:
-
-```yaml
-llm:
-  provider: OPENAI
-
-  meta:
-    model: gpt-4o-mini
-    max_tokens: 1200
-    temperature: 0.3
-    stream: false   # true for gateways that only serve streaming responses (OPENAI provider, chat API models)
-
-  http_client:
-    timeout: 120
-    api_url: https://api.openai.com/v1
-    api_token: ${OPENAI_API_KEY}
-
-vcs:
-  provider: GITLAB
-
-  pipeline:
-    project_id: "1"
-    merge_request_id: "100"
-
-  http_client:
-    timeout: 120
-    api_url: https://gitlab.com
-    api_token: ${GITLAB_API_TOKEN}
-```
-
-👉 This will:
-
-- Run AI Review against your codebase.
-- Generate inline and/or summary comments (depending on the selected mode).
-- Use your chosen LLM provider (OpenAI GPT-4o-mini in this example).
-
-> **Note:** Running `ai-review run` executes the full review (inline + summary).
-> To run only one mode, use the dedicated subcommands:
-> - ai-review run-inline
-> - ai-review run-context
-> - ai-review run-summary
-> - ai-review run-inline-reply
-> - ai-review run-summary-reply
-
----
-
-AI Review can be configured via `.ai-review.yaml`, `.ai-review.json`, or `.env`. See [./docs/configs](./docs/configs)
-for complete, ready-to-use examples.
-
-Key things you can customize:
-
-- **LLM provider** — OpenAI, Gemini, Claude, Ollama, Bedrock, OpenRouter, or Azure OpenAI
-- **Model settings** — model name, temperature, max tokens
-- **VCS integration** — works out of the box with **GitLab**, **GitHub**, **Bitbucket Cloud**, **Bitbucket Server**,
-  **Azure DevOps**, and **Gitea**
-- **Agent mode** — enable iterative repository exploration before review
-- **Review policy** — which files to include/exclude, review modes
-- **Prompts** — inline/context/summary/agent prompt templates
-
-👉 Minimal configuration is enough to get started. Use the full reference configs if you want fine-grained control (
-timeouts, artifacts, logging, etc.).
-
----
-
-## ⚙️ CI/CD Integration
-
-AI Review works out-of-the-box with major CI providers.
-Use these snippets to run AI Review automatically on Pull/Merge Requests.  
-Each integration uses environment variables for LLM and VCS configuration.
-
-> For full configuration details (timeouts, artifacts, logging, prompt overrides), see [./docs/configs](./docs/configs).
-
-> Running against gateways like OpenCode Go, or reviewing untrusted checkouts in CI? See
-> [./docs/ci/gitlab-opencode-go.md](./docs/ci/gitlab-opencode-go.md) for the `LLM__META__API` routing setup and the
-> `AI_REVIEW_CONFIG_FILE_*` security pins.
-
-### 🚀 GitHub Actions
-
-Add a workflow like this (manual trigger from **Actions** tab):
-
-```yaml
-name: AI Review
-
-on:
-  workflow_dispatch:
-    inputs:
-      review-command:
-        type: choice
-        default: run
-        options:
-          - run
-          - run-inline
-          - run-context
-          - run-summary
-          - run-inline-reply
-          - run-summary-reply
-          - clear-inline
-          - clear-summary
-      pull-request-number:
-        type: string
-        required: true
-jobs:
-  ai-review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - uses: Nikita-Filonov/ai-review@v0.67.0
-        with:
-          review-command: ${{ inputs.review-command }}
-        env:
-          # --- LLM configuration ---
-          LLM__PROVIDER: "OPENAI"
-          LLM__META__MODEL: "gpt-4o-mini"
-          LLM__META__MAX_TOKENS: "15000"
-          LLM__META__TEMPERATURE: "0.3"
-          LLM__HTTP_CLIENT__API_URL: "https://api.openai.com/v1"
-          LLM__HTTP_CLIENT__API_TOKEN: ${{ secrets.OPENAI_API_KEY }}
-
-          # --- GitHub integration ---
-          VCS__PROVIDER: "GITHUB"
-          VCS__PIPELINE__OWNER: ${{ github.repository_owner }}
-          VCS__PIPELINE__REPO: ${{ github.event.repository.name }}
-          VCS__PIPELINE__PULL_NUMBER: ${{ inputs.pull-request-number }}
-          VCS__HTTP_CLIENT__API_URL: "https://api.github.com"
-          VCS__HTTP_CLIENT__API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-```
-
-🔗 Full example: [./docs/ci/github.yaml](./docs/ci/github.yaml)
-
-### 🚀 GitLab CI/CD
-
-For GitLab users:
-
-```yaml
-ai-review:
-  when: manual
-  stage: review
-  image: nikitafilonov/ai-review:latest
-  rules:
-    - if: '$CI_MERGE_REQUEST_IID'
-  script:
-    - ai-review run
-  variables:
-    # --- LLM configuration ---
-    LLM__PROVIDER: "OPENAI"
-    LLM__META__MODEL: "gpt-4o-mini"
-    LLM__META__MAX_TOKENS: "15000"
-    LLM__META__TEMPERATURE: "0.3"
-    LLM__HTTP_CLIENT__API_URL: "https://api.openai.com/v1"
-    LLM__HTTP_CLIENT__API_TOKEN: "$OPENAI_API_KEY"
-
-    # --- GitLab integration ---
-    VCS__PROVIDER: "GITLAB"
-    VCS__PIPELINE__PROJECT_ID: "$CI_PROJECT_ID"
-    VCS__PIPELINE__MERGE_REQUEST_ID: "$CI_MERGE_REQUEST_IID"
-    VCS__HTTP_CLIENT__API_URL: "$CI_SERVER_URL"
-    VCS__HTTP_CLIENT__API_TOKEN: "$CI_JOB_TOKEN"
-  allow_failure: true  # Optional: don't block pipeline if AI review fails
-
-```
-
-🔗 Full example: [./docs/ci/gitlab.yaml](./docs/ci/gitlab.yaml)
-
----
-
-## 📘 Documentation
-
-See these folders for reference templates and full configuration options:
-
-- [./docs/ci](./docs/ci) — CI/CD integration templates (GitHub Actions, GitLab CI, Bitbucket Pipelines, Jenkins)
-- [./docs/cli](./docs/cli) — CLI command reference and usage examples
-- [./docs/hooks](./docs/hooks) — hook reference and lifecycle events
-- [./docs/configs](./docs/configs) — full configuration examples (`.yaml`, `.json`, `.env`)
-- [./docs/prompts](./docs/prompts) — prompt templates for Python/Go (light & strict modes)
-- [./docs/troubleshooting.md](./docs/troubleshooting) — common environment and Git-related issues
-
----
-
-## ⚠️ Privacy & Responsibility Notice
-
-AI Review does **not store**, **log**, or **transmit** your source code to any external service other than the **LLM
-provider** explicitly configured in your `.ai-review.yaml`.
-
-All data is sent **directly** from your CI/CD environment to the selected LLM API endpoint (e.g. OpenAI, Gemini,
-Claude, OpenRouter). No intermediary servers or storage layers are involved.
-
-If you use **Ollama**, requests are sent to your **local or self-hosted Ollama runtime**  
-(by default `http://localhost:11434`). This allows you to run reviews completely **offline**, keeping all data strictly
-inside your infrastructure.
-
-> ⚠️ Please ensure you use proper API tokens and avoid exposing corporate or personal secrets.
-> If you accidentally leak private code or credentials due to incorrect configuration (e.g., using a personal key
-> instead of an enterprise one), it is **your responsibility** — the tool does not retain or share any data by itself.
-
----
-
-🧠 **AI Review** — open-source AI-powered code reviewer
-
-- 📦 [PyPI](https://pypi.org/project/xai-review/)
-- 🐳 [DockerHub](https://hub.docker.com/r/nikitafilonov/ai-review)
+Apache License 2.0 — see [LICENSE](./LICENSE).
