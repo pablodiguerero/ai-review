@@ -187,10 +187,6 @@ secret committed in it is still read and sent to the LLM gateway like any other 
   and `#ai-review-summary` never cross-match even though one name contains the other.
 - Do not use `*-free` models. Rotate plaintext credentials that live in the reviewed repositories: the agent sends
   everything it reads to the gateway.
-- `ox-alpha-free` is available as another optional manual reviewer, alongside grok and kimi, served via
-  `/chat/completions` (`LLM__META__API=CHAT`), tags `#ai-review-ox-summary`/`#ai-review-ox-reply`. WARNING:
-  `ox-alpha-free` is a `*-free` model — the provider may use submitted data to improve the model — so only point it
-  at repositories without committed secrets, and keep its use opt-in/manual.
 - Fallback during a gateway outage: `LLM__PROVIDER=OPENROUTER` with the OpenRouter key and model id (config-only
   change).
 - To let a retried job skip tool iterations it already paid for, mount a runner-persistent directory and set
