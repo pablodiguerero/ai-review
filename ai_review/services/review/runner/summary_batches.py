@@ -53,6 +53,6 @@ def consolidate_batches(
         sections.append(f"## Part {i}/{total_batches} — {n_files} files\n\n{body}")
 
     if scores:
-        sections.append(f"Overall score: {min(scores):.1f}")
+        sections.append(f"Overall score: {min(scores):.1f}/10")
 
     return "\n\n".join(sections)

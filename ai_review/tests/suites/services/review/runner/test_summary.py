@@ -197,7 +197,7 @@ async def test_run_batched_posts_one_consolidated_comment_with_min_score_and_per
     assert "## Part 2/2 — 1 files" in consolidated_text
     assert "Findings for a." in consolidated_text
     assert "Findings for b." in consolidated_text
-    assert consolidated_text.strip().endswith("Overall score: 6.0")
+    assert consolidated_text.strip().endswith("Overall score: 6.0/10")
 
     assert any(call[0] == "process_summary_comment" for call in fake_review_comment_gateway.calls)
 
@@ -227,7 +227,7 @@ async def test_run_batched_treats_one_failed_part_as_skipped_but_still_posts(
     consolidated_text = parse_call[1]["output"]
     assert "## Part 1/2 — no result (skipped)" in consolidated_text
     assert "## Part 2/2 — 1 files" in consolidated_text
-    assert consolidated_text.strip().endswith("Overall score: 6.0")
+    assert consolidated_text.strip().endswith("Overall score: 6.0/10")
 
 
 @pytest.mark.asyncio

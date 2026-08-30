@@ -51,7 +51,7 @@ def test_consolidate_batches_builds_sections_strips_scores_and_uses_min() -> Non
     assert "Findings for a." in result
     assert "Findings for b." in result
     assert "Overall score: 9" not in result
-    assert result.strip().endswith("Overall score: 6.0")
+    assert result.strip().endswith("Overall score: 6.0/10")
 
 
 def test_consolidate_batches_marks_empty_batch_as_skipped_and_excludes_from_scores() -> None:
@@ -65,7 +65,7 @@ def test_consolidate_batches_marks_empty_batch_as_skipped_and_excludes_from_scor
 
     assert "## Part 1/2 — no result (skipped)" in result
     assert "## Part 2/2 — 1 files" in result
-    assert result.strip().endswith("Overall score: 6.0")
+    assert result.strip().endswith("Overall score: 6.0/10")
 
 
 def test_consolidate_batches_omits_score_line_when_no_part_has_a_score() -> None:
