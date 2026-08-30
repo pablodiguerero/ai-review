@@ -1219,3 +1219,132 @@ async def test_two_run_sequence_new_commit_triggers_genuine_new_round_not_bare_f
     assert stored_after_round_two.round == 1
     assert stored_after_round_two.head_sha == "sha2"
     assert "round one output" in stored_after_round_two.prior_synopsis
+
+
+@pytest.mark.asyncio
+async def test_run_new_commit_round_starts_from_a_fresh_context_budget(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_tool_service: FakeAgentToolService,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    agent_loop_service.resume_min_new_tool_calls = 1
+    agent_loop_service.max_context_chars = 100
+    fake_agent_checkpoint_service.store["k1"] = AgentCheckpointSchema(
+        key="k1",
+        head_sha="old-sha",
+        round=0,
+        stage=AgentCheckpointStage.REVIEWED,
+        traces=[],
+        signatures=[],
+        executed_tool_calls=9,
+        blocked_tool_calls=0,
+        iterations=9,
+        context_used=10_000,
+        created_at="2026-08-19T00:00:00+00:00",
+        updated_at="2026-08-19T00:00:00+00:00",
+    )
+
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            '{"action":"TOOL_CALL","command":"ls"}',
+            '{"action":"FINAL","content":"new-round-done"}',
+        ]),
+    )
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="k1", checkpoint_head_sha="new-sha")
+
+    assert result.stop_reason == "final"
+    assert result.final_text == "new-round-done"
+    assert fake_agent_tool_service.calls == [("execute", {"command": "ls"})]
+    assert fake_agent_checkpoint_service.store["k1"].context_used == len("AGENT_TOOL_RESULT")
+
+
+@pytest.mark.asyncio
+async def test_run_investigates_again_once_force_final_replays_are_exhausted(
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_tool_service: FakeAgentToolService,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    agent_loop_service.resume_min_new_tool_calls = 1
+    agent_loop_service.max_final_replays = 1
+    fake_agent_checkpoint_service.store["k1"] = AgentCheckpointSchema(
+        key="k1",
+        head_sha="sha1",
+        round=1,
+        stage=AgentCheckpointStage.NEEDS_FINAL,
+        traces=[],
+        signatures=[],
+        executed_tool_calls=3,
+        blocked_tool_calls=0,
+        iterations=3,
+        context_used=0,
+        final_replays=1,
+        created_at="2026-08-19T00:00:00+00:00",
+        updated_at="2026-08-19T00:00:00+00:00",
+    )
+
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            '{"action":"TOOL_CALL","command":"ls"}',
+            '{"action":"FINAL","content":"reinvestigated"}',
+        ]),
+    )
+
+    result = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="k1", checkpoint_head_sha="sha1")
+    output = capsys.readouterr().out
+
+    assert result.stop_reason == "final"
+    assert result.final_text == "reinvestigated"
+    assert "force-final replays exhausted" in output
+    assert fake_agent_tool_service.calls == [("execute", {"command": "ls"})]
+    assert fake_agent_checkpoint_service.store["k1"].round == 2
+
+
+@pytest.mark.asyncio
+async def test_run_replays_force_final_only_up_to_max_final_replays(
+        monkeypatch: pytest.MonkeyPatch,
+        agent_loop_service: AgentLoopService,
+        fake_llm_client: FakeLLMClient,
+        fake_agent_checkpoint_service: FakeAgentCheckpointService,
+) -> None:
+    agent_loop_service.max_iterations = 1
+    agent_loop_service.max_final_replays = 1
+
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            "not-json",
+            '{"action":"TOOL_CALL","command":"cat x"}',
+            '{"action":"TOOL_CALL","command":"cat y"}',
+        ]),
+    )
+
+    first = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="k1", checkpoint_head_sha="sha1")
+
+    assert first.stop_reason == "forced_final_no_review"
+    assert fake_agent_checkpoint_service.store["k1"].final_replays == 0
+
+    monkeypatch.setattr(
+        fake_llm_client,
+        "chat",
+        sequence_chat([
+            '{"action":"TOOL_CALL","command":"cat x"}',
+            '{"action":"TOOL_CALL","command":"cat y"}',
+        ]),
+    )
+
+    second = await agent_loop_service.run("PROMPT", "SYSTEM", checkpoint_key="k1", checkpoint_head_sha="sha1")
+
+    assert second.stop_reason == "forced_final_no_review"
+    assert fake_agent_checkpoint_service.store["k1"].final_replays == 1
+    assert fake_agent_checkpoint_service.store["k1"].stage == AgentCheckpointStage.NEEDS_FINAL

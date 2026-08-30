@@ -22,6 +22,7 @@ class AgentCheckpointSchema(BaseModel):
     blocked_tool_calls: int = 0
     iterations: int = 0
     context_used: int = 0
+    final_replays: int = 0
     prior_synopsis: str = ""
     created_at: str
     updated_at: str

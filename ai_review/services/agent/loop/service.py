@@ -42,6 +42,7 @@ class AgentRunState:
     created_at: str = ""
     start_time: float = 0.0
     deadline_at: float | None = None
+    final_replays: int = 0
 
 
 class AgentLoopService(AgentLoopServiceProtocol):
@@ -63,6 +64,7 @@ class AgentLoopService(AgentLoopServiceProtocol):
         self.min_tool_calls = settings.agent.min_tool_calls
         self.empty_response_retries = settings.agent.empty_response_retries
         self.force_final_attempts = settings.agent.force_final_attempts
+        self.max_final_replays = settings.agent.max_final_replays
         self.deadline_seconds = settings.agent.deadline_seconds
         self.llm_request_timeout = settings.llm.http_client.timeout
         self.resume_min_new_tool_calls = settings.agent.resume_min_new_tool_calls
@@ -125,6 +127,7 @@ class AgentLoopService(AgentLoopServiceProtocol):
             blocked_tool_calls=state.blocked_tool_calls,
             iterations=state.iterations,
             context_used=state.context_used,
+            final_replays=state.final_replays,
             prior_synopsis=persisted_synopsis,
             created_at=state.created_at,
             updated_at=datetime.now(timezone.utc).isoformat(),
@@ -340,15 +343,23 @@ class AgentLoopService(AgentLoopServiceProtocol):
 
                 state.executed_tool_calls = restored.executed_tool_calls
                 state.blocked_tool_calls = restored.blocked_tool_calls
-                state.context_used = restored.context_used
                 state.created_at = restored.created_at
 
-                if restored.stage == AgentCheckpointStage.NEEDS_FINAL and same_head:
+                can_replay_final = (
+                    restored.stage == AgentCheckpointStage.NEEDS_FINAL
+                    and same_head
+                    and restored.final_replays < self.max_final_replays
+                )
+
+                if can_replay_final:
                     state.traces = list(restored.traces)
                     state.signatures = set(restored.signatures)
                     state.iterations = restored.iterations
                     state.prior_synopsis = restored.prior_synopsis
                     state.round = restored.round
+                    # Same round continues, so the context budget it already spent carries over.
+                    state.context_used = restored.context_used
+                    state.final_replays = restored.final_replays + 1
                     force_final_only = True
                     logger.info(f"Agent loop starting round {state.round} (resumed: recover-final)")
 
@@ -361,13 +372,18 @@ class AgentLoopService(AgentLoopServiceProtocol):
                     resumed_round = True
                     logger.info(f"Agent loop starting round {state.round} (resumed: new-commit)")
 
-                elif restored.stage == AgentCheckpointStage.REVIEWED:
+                elif restored.stage in (AgentCheckpointStage.REVIEWED, AgentCheckpointStage.NEEDS_FINAL):
                     state.traces = list(restored.traces)
                     state.signatures = set(restored.signatures)
                     state.prior_synopsis = restored.prior_synopsis
                     state.round = restored.round + 1
                     resumed_round = True
-                    logger.info(f"Agent loop starting round {state.round} (resumed: restart)")
+                    resume_reason = (
+                        "restart"
+                        if restored.stage == AgentCheckpointStage.REVIEWED
+                        else "force-final replays exhausted, investigating again"
+                    )
+                    logger.info(f"Agent loop starting round {state.round} (resumed: {resume_reason})")
 
                 else:
                     state.traces = list(restored.traces)
@@ -375,6 +391,7 @@ class AgentLoopService(AgentLoopServiceProtocol):
                     state.iterations = restored.iterations
                     state.prior_synopsis = restored.prior_synopsis
                     state.round = restored.round
+                    state.context_used = restored.context_used
                     resume_from_iteration = restored.iterations + 1
                     logger.info(f"Agent loop starting round {state.round} (resumed: continue)")
 

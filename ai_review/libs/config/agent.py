@@ -34,6 +34,10 @@ class AgentConfig(BaseModel):
     max_command_output_chars: int = Field(default=8_000, ge=1_000, le=500_000)
     empty_response_retries: int = Field(default=2, ge=0, le=10)
     force_final_attempts: int = Field(default=2, ge=1, le=10)
+    # Reruns that may resume straight into force-final instead of investigating again. Replaying is
+    # cheap when the previous job merely died mid-final; past this many tries the final itself is the
+    # thing that is broken, and another replay would just reproduce it.
+    max_final_replays: int = Field(default=1, ge=0, le=10)
     fallback_to_direct_chat: bool = False
     deadline_seconds: int | None = Field(default=None, ge=1)
     checkpoint_dir: Path | None = None
